@@ -5,6 +5,12 @@
 
 #define TAG "JDB_PARSER"
 
+uint8_t CMD_REQUEST_CELL_VOLTAGES_LEN=7;
+uint8_t CMD_REQUEST_CELL_VOLTAGES[]={0xDD, 0xA5, 0x04, 0x00, 0xFF, 0xFC, 0x77};
+
+uint8_t CMD_REQUEST_BASIC_INFO_LEN=7;
+uint8_t CMD_REQUEST_BASIC_INFO[]={0xDD, 0xA5, 0x03, 0x00, 0xFF, 0xFD, 0x77};
+
 class BaseJDBFromBMS {
 public:
     uint8_t registerAddress;
@@ -47,7 +53,7 @@ public:
         for(uint8_t i=0; i<inputBytesLen; i++){
             checksum+=inputBytes[i];
         }
-        return ((uint16_t)0x10000U)-checksum;
+        return (uint16_t)(0x10000U-checksum);
     }
     
     static uint16_t parseUShort(const uint8_t* inputBytes){
@@ -137,8 +143,7 @@ public:
         }
         const uint8_t payloadLen=inputIt-(inputBytes+2);
         const uint16_t computedChecksum=computeChecksum(inputBytes+2, payloadLen);
-        const uint16_t inputChecksum=parseUShort(inputIt);
-        inputIt+=2;
+        const uint16_t inputChecksum=parseUShort(inputIt); inputIt+=2;
         if(computedChecksum!=inputChecksum){
             ESP_LOGW(TAG, "Expected checksum 0x%02X, but was 0x%02X", inputChecksum, computedChecksum);
         }
@@ -154,6 +159,8 @@ public:
 };
 
 extern "C" void test_parser(){
+//     uint16_t cksum=computeChecksum(NULL, 0);
+//     ESP_LOGE(TAG, "cksum=%d", cksum);
     //The BLE read pads the frame with nulls??
     const uint8_t FROM_BMS1[]="\xdd\x04\x00\x08\x0d\x2e\x0d\x2b\x0d\x2b\x0d\x2b\xff\x15\x77\x00\x00\x00\x00\x00";
     JDBParser parser;
@@ -171,4 +178,10 @@ extern "C" void test_parser(){
     const uint8_t FROM_BMS_EXAMPLE2[]="\xDD\x05\x00\x0A\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\xFD\xE9\x77";
     JDBParseResult example2;
     parser.parseBytesFromBMS(FROM_BMS_EXAMPLE2, sizeof(FROM_BMS_EXAMPLE2), &example2);
+}
+
+extern "C" void handle_jbd_response(const uint8_t* inputBytes, const uint8_t inputBytesLen){
+    JDBParser parser;
+    JDBParseResult msg;
+    parser.parseBytesFromBMS(inputBytes, inputBytesLen, &msg);
 }
