@@ -20,6 +20,8 @@
 #define TAG "JDB_MAIN"
 
 extern "C" void handle_jbd_response(const uint8_t* inputBytes, const uint8_t inputBytesLen);
+            esp_gattc_char_elem_t readableCharactertic;
+            esp_gattc_char_elem_t writeableCharactertic;
 
 class JBDConnection {
 public:
@@ -43,6 +45,7 @@ public:
     }
     
     void setCharHandle(uint16_t readableCharacterticHandle, uint16_t writeableCharacterticHandle){
+        ESP_LOGD(TAG, "setCharHandle: readableCharacterticHandle=%d, writeableCharacterticHandle=%d", readableCharacterticHandle, writeableCharacterticHandle);
         this->readableCharacterticHandle=readableCharacterticHandle;
         this->writeableCharacterticHandle=writeableCharacterticHandle;
     }
@@ -90,7 +93,7 @@ public:
         return NULL;
     }
     
-    JBDConnection* findConnectionByConnId(uint16_t& connIdToFind){
+    JBDConnection* findConnectionByConnId(uint16_t connIdToFind){
         for(int i=0; i<jbdControllersCount; i++){
             if(jbdControllers[i].conn_id==connIdToFind){
                 return &jbdControllers[i];
@@ -110,7 +113,7 @@ public:
     static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param){
         switch (event) {
         case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT: {
-            uint32_t duration = 10; //the unit of the duration is second
+            uint32_t duration = 7; //the unit of the duration is second
             esp_ble_gap_start_scanning(duration);
             break;
         }
@@ -261,7 +264,6 @@ public:
                 break;
             }
 
-            esp_gattc_char_elem_t writeableCharactertic;
             count=1;
             status = esp_ble_gattc_get_char_by_uuid(gattc_if,
                                                         p_data->search_cmpl.conn_id,
@@ -280,7 +282,6 @@ public:
             }
 
             //-------
-            esp_gattc_char_elem_t readableCharactertic;
             count=1;
             status = esp_ble_gattc_get_char_by_uuid( gattc_if,
                                                         p_data->search_cmpl.conn_id,
@@ -303,17 +304,18 @@ public:
             }
             conn->setCharHandle(readableCharactertic.char_handle, writeableCharactertic.char_handle);
             esp_ble_gattc_register_for_notify(gattc_if, conn->macAddress, conn->readableCharacterticHandle);
-//             break;
-//         }
-//         case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
-//             ESP_LOGI(TAG, "ESP_GATTC_REG_FOR_NOTIFY_EVT");
-//             if (p_data->reg_for_notify.status != ESP_GATT_OK){
-//                 ESP_LOGE(TAG, "REG FOR NOTIFY failed: error status = %d", p_data->reg_for_notify.status);
-//                 break;
-//             }
-//             JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(param->reg_for_notify.conn_id);
+            break;
+        }
+        case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+            ESP_LOGI(TAG, "ESP_GATTC_REG_FOR_NOTIFY_EVT");
+            if (p_data->reg_for_notify.status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "REG FOR NOTIFY failed: error status = %d", p_data->reg_for_notify.status);
+                break;
+            }
+            ESP_LOGD(TAG, "p_data->reg_for_notify.handle=%d", p_data->reg_for_notify.handle);
+            JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(0);
 #if 1
-//             uint16_t count = 0;
+            uint16_t count = 0;
             esp_gatt_status_t ret_status = esp_ble_gattc_get_attr_count( gattc_if,
                                                                             conn->conn_id,
                                                                             ESP_GATT_DB_DESCRIPTOR,
@@ -366,12 +368,29 @@ public:
                 ESP_LOGE(TAG, "esp_ble_gattc_write_char_descr error");
             }
             ESP_LOGI(TAG, "Requested notification");
+            write_status = esp_ble_gattc_read_char_descr( gattc_if,
+                                                            conn->conn_id,
+                                                            notificationDescriptor.handle,
+                                                            ESP_GATT_AUTH_REQ_NONE);
+            if (write_status != ESP_OK){
+                ESP_LOGE(TAG, "esp_ble_gattc_read_char_descr error");
+            }
 #endif
             break;
         }
-        case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
-            break; //Ignored
+        case ESP_GATTC_READ_DESCR_EVT:{
+            ESP_LOGI(TAG, "ESP_GATTC_READ_DESCR_EVT");
+            esp_log_buffer_hex(TAG, p_data->read.value, p_data->read.value_len);
+            break;
         }
+//         case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+//             ESP_LOGI(TAG, "ESP_GATTC_REG_FOR_NOTIFY_EVT");
+//             if(p_data->reg_for_notify.status != ESP_GATT_OK){
+//                 ESP_LOGE(TAG, "p_data->reg_for_notify.status failed");
+//                 break;
+//             }
+//             break;
+//         }
         case ESP_GATTC_NOTIFY_EVT:
             ESP_LOGI(TAG, "ESP_GATTC_NOTIFY_EVT");
             if (p_data->notify.is_notify){
@@ -409,6 +428,7 @@ public:
             break;
         }
         case ESP_GATTC_WRITE_CHAR_EVT:{
+            ESP_LOGI(TAG, "ESP_GATTC_WRITE_CHAR_EVT");
             if (p_data->write.status != ESP_GATT_OK){
                 ESP_LOGE(TAG, "write char failed, error status = %x", p_data->write.status);
                 break;
