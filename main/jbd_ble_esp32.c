@@ -60,7 +60,6 @@ static esp_ble_scan_params_t ble_scan_params = {
 struct gattc_profile_inst {
     esp_gattc_cb_t gattc_cb;
     uint16_t gattc_if;
-    uint16_t app_id;
     uint16_t conn_id;
     uint16_t service_start_handle;
     uint16_t service_end_handle;
@@ -100,6 +99,7 @@ void sendBasicInfoRequest(){
 
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param) {
     esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
+    ESP_LOGI(TAG, "gattc_profile_event_handler (TOPLEVEL)");
 
     switch (event) {
     case ESP_GATTC_REG_EVT: {
@@ -470,7 +470,7 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
 }
 
 void test_parser();
-void app_main(void)
+void connect_single_jdb(void)
 {
 //     test_parser();
 //     return;
@@ -537,7 +537,7 @@ void app_main(void)
     if (local_mtu_ret){
         ESP_LOGE(TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
-#if 1
+#if 0
     while(true){
 //         vTaskDelay(5000/portTICK_PERIOD_MS);
 //         sendBasicInfoRequest();
