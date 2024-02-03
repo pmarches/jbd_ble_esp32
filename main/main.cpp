@@ -17,11 +17,11 @@
 #include "freertos/semphr.h"
 #include <ctype.h>
 
-#define TAG "JDB_MAIN"
+#include <jbd_parser.h>
+
+#define TAG "JBD_MAIN"
 
 extern "C" void handle_jbd_response(const uint8_t* inputBytes, const uint8_t inputBytesLen);
-            esp_gattc_char_elem_t readableCharactertic;
-            esp_gattc_char_elem_t writeableCharactertic;
 
 class JBDConnection {
 public:
@@ -33,6 +33,9 @@ public:
     uint16_t service_end_handle;
     uint16_t readableCharacterticHandle;
     uint16_t writeableCharacterticHandle;
+    uint8_t defragbuffer[128];
+    uint8_t defragbufferLen=0;
+    JBDParser parser;
     
     JBDConnection(){
         semaphore=xSemaphoreCreateMutex();
@@ -45,22 +48,27 @@ public:
     }
     
     void setCharHandle(uint16_t readableCharacterticHandle, uint16_t writeableCharacterticHandle){
-        ESP_LOGD(TAG, "setCharHandle: readableCharacterticHandle=%d, writeableCharacterticHandle=%d", readableCharacterticHandle, writeableCharacterticHandle);
+        ESP_LOGD(TAG, "setCharHandle: connectionId=%d, readableCharacterticHandle=%d, writeableCharacterticHandle=%d", conn_id, readableCharacterticHandle, writeableCharacterticHandle);
         this->readableCharacterticHandle=readableCharacterticHandle;
         this->writeableCharacterticHandle=writeableCharacterticHandle;
     }
+    
+    void handle_jbd_notification(uint8_t* fragmentedBytes, uint8_t fragmentLen);    
+    void requestBasicInfo();
 };
 
 
 class JBDBLEStack {
     static const uint8_t JBD_APP_ID=0;
     static const uint8_t JBD_CONTROLLER_COUNT=2;
+    static esp_gattc_char_elem_t readableCharactertic; //These need to be static for notification to work
+    static esp_gattc_char_elem_t writeableCharactertic; //These need to be static for notification to work
     
 public:
     esp_gatt_if_t gattc_if;
     
     static esp_bt_uuid_t JBD_MAIN_SERVICE_UUID; //0000ff00-0000-1000-8000-00805f9b34fb
-    static esp_bt_uuid_t JDB_READABLE_CHAR_UUID; //0000ff01-0000-1000-8000-00805f9b34fb
+    static esp_bt_uuid_t JBD_READABLE_CHAR_UUID; //0000ff01-0000-1000-8000-00805f9b34fb
     static esp_bt_uuid_t JBD_WRITEABLE_CHAR_UUID;//0000ff02-0000-1000-8000-00805f9b34fb
 
     static JBDBLEStack* instance;
@@ -287,7 +295,7 @@ public:
                                                         p_data->search_cmpl.conn_id,
                                                         conn->service_start_handle,
                                                         conn->service_end_handle,
-                                                        JDB_READABLE_CHAR_UUID,
+                                                        JBD_READABLE_CHAR_UUID,
                                                         &readableCharactertic,
                                                         &count);
             if (status != ESP_GATT_OK){
@@ -368,38 +376,20 @@ public:
                 ESP_LOGE(TAG, "esp_ble_gattc_write_char_descr error");
             }
             ESP_LOGI(TAG, "Requested notification");
-            write_status = esp_ble_gattc_read_char_descr( gattc_if,
-                                                            conn->conn_id,
-                                                            notificationDescriptor.handle,
-                                                            ESP_GATT_AUTH_REQ_NONE);
-            if (write_status != ESP_OK){
-                ESP_LOGE(TAG, "esp_ble_gattc_read_char_descr error");
-            }
 #endif
             break;
         }
-        case ESP_GATTC_READ_DESCR_EVT:{
-            ESP_LOGI(TAG, "ESP_GATTC_READ_DESCR_EVT");
-            esp_log_buffer_hex(TAG, p_data->read.value, p_data->read.value_len);
-            break;
-        }
-//         case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
-//             ESP_LOGI(TAG, "ESP_GATTC_REG_FOR_NOTIFY_EVT");
-//             if(p_data->reg_for_notify.status != ESP_GATT_OK){
-//                 ESP_LOGE(TAG, "p_data->reg_for_notify.status failed");
-//                 break;
-//             }
-//             break;
-//         }
-        case ESP_GATTC_NOTIFY_EVT:
+        case ESP_GATTC_NOTIFY_EVT: {
             ESP_LOGI(TAG, "ESP_GATTC_NOTIFY_EVT");
             if (p_data->notify.is_notify){
                 ESP_LOGI(TAG, "ESP_GATTC_NOTIFY_EVT, receive notify value:");
             }else{
                 ESP_LOGI(TAG, "ESP_GATTC_NOTIFY_EVT, receive indicate value:");
             }
-            esp_log_buffer_hex(TAG, p_data->notify.value, p_data->notify.value_len);
+            JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(param->notify.conn_id);
+            conn->handle_jbd_notification(p_data->notify.value, p_data->notify.value_len);
             break;
+        }
         case ESP_GATTC_WRITE_DESCR_EVT: {
             ESP_LOGI(TAG, "ESP_GATTC_WRITE_DESCR_EVT");
             if (p_data->write.status != ESP_GATT_OK){
@@ -407,24 +397,8 @@ public:
                 break;
             }
             ESP_LOGI(TAG, "write descr success on connection %d, handle=%d. Notification is enabled.", p_data->write.conn_id, p_data->write.handle);
-//             sendBasicInfoRequest();
-                    ESP_LOGI(TAG, "Sending request for basic info");
-//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES_LEN;
-//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES[];
             JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(param->write.conn_id);
-            extern uint8_t CMD_REQUEST_BASIC_INFO_LEN;
-            extern uint8_t CMD_REQUEST_BASIC_INFO[];
-            esp_err_t err=esp_ble_gattc_write_char( gattc_if,
-                                    p_data->write.conn_id,
-                                    conn->writeableCharacterticHandle,
-                                    CMD_REQUEST_BASIC_INFO_LEN,
-                                    CMD_REQUEST_BASIC_INFO,
-                                    ESP_GATT_WRITE_TYPE_NO_RSP,
-                                    ESP_GATT_AUTH_REQ_NONE);
-            if(ESP_OK != err){
-                ESP_LOGE(TAG, "Failed to write request");
-            }
-
+            conn->requestBasicInfo();
             break;
         }
         case ESP_GATTC_WRITE_CHAR_EVT:{
@@ -441,9 +415,9 @@ public:
             break;
         }
         case ESP_GATTC_READ_CHAR_EVT: {
+            //This should not occur, we receive the data thru notifications, this ensure we can defragment the packets.
             ESP_LOGI(TAG, "ESP_GATTC_READ_CHAR_EVT value len=%d", param->read.value_len);
             esp_log_buffer_hex(TAG, p_data->read.value, p_data->read.value_len);
-            handle_jbd_response(p_data->read.value, p_data->read.value_len);
             break;
         }
         default:
@@ -516,7 +490,10 @@ public:
     void search(){
     }
 };
+
 JBDBLEStack* JBDBLEStack::instance=NULL;
+esp_gattc_char_elem_t JBDBLEStack::readableCharactertic; //These need to be static for notification to work
+esp_gattc_char_elem_t JBDBLEStack::writeableCharactertic; //These need to be static for notification to work
 esp_bt_uuid_t JBDBLEStack::JBD_MAIN_SERVICE_UUID = { //0000ff00-0000-1000-8000-00805f9b34fb
     .len = ESP_UUID_LEN_16,
     .uuid={
@@ -524,7 +501,7 @@ esp_bt_uuid_t JBDBLEStack::JBD_MAIN_SERVICE_UUID = { //0000ff00-0000-1000-8000-0
     }
 };
 
-esp_bt_uuid_t JBDBLEStack::JDB_READABLE_CHAR_UUID = { //0000ff01-0000-1000-8000-00805f9b34fb
+esp_bt_uuid_t JBDBLEStack::JBD_READABLE_CHAR_UUID = { //0000ff01-0000-1000-8000-00805f9b34fb
     .len = ESP_UUID_LEN_16,
     .uuid={
         .uuid16 = 0xFF01
@@ -543,7 +520,43 @@ void JBDConnection::waitConnection(){
     xSemaphoreTake(semaphore, portMAX_DELAY);
 }
 
+void JBDConnection::handle_jbd_notification(uint8_t* fragmentedBytes, uint8_t fragmentLen){
+    ESP_LOGD(TAG, "defragbufferLen=%d fragmentLen=%d", defragbufferLen, fragmentLen);
+    esp_log_buffer_hex(TAG, fragmentedBytes, fragmentLen);
+    memcpy(defragbuffer+defragbufferLen, fragmentedBytes, fragmentLen);
+    defragbufferLen+=fragmentLen;
+    
+    JBDParseResult msg;
+    uint8_t const* newLocation=parser.parseBytesFromBMS(defragbuffer, defragbufferLen, &msg);
+    uint8_t nbBytesParsed=newLocation-defragbuffer;
+    if(nbBytesParsed){
+        ESP_LOGI(TAG, "Sucessfully parsed message");
+        memmove(defragbuffer, newLocation, nbBytesParsed);
+        defragbufferLen=defragbufferLen-nbBytesParsed;
+    }
+}
+
+void JBDConnection::requestBasicInfo(){
+    ESP_LOGI(TAG, "Sending request for basic info");
+//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES_LEN;
+//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES[];
+    extern uint8_t CMD_REQUEST_BASIC_INFO_LEN;
+    extern uint8_t CMD_REQUEST_BASIC_INFO[];
+    esp_err_t err=esp_ble_gattc_write_char(JBDBLEStack::getInstance()->gattc_if,
+                            this->conn_id,
+                            this->writeableCharacterticHandle,
+                            CMD_REQUEST_BASIC_INFO_LEN,
+                            CMD_REQUEST_BASIC_INFO,
+                            ESP_GATT_WRITE_TYPE_NO_RSP,
+                            ESP_GATT_AUTH_REQ_NONE);
+    if(ESP_OK != err){
+        ESP_LOGE(TAG, "Failed to write request");
+    }
+}
+
+
 extern "C" void app_main(void){
     JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
     jbdBleStack->search();
 }
+
