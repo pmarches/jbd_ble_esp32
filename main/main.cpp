@@ -19,12 +19,18 @@
 
 #define TAG "JDB_MAIN"
 
+extern "C" void handle_jbd_response(const uint8_t* inputBytes, const uint8_t inputBytesLen);
+
 class JBDConnection {
 public:
     esp_bd_addr_t macAddress;
     esp_ble_addr_type_t addressType;
     uint16_t conn_id;
     SemaphoreHandle_t semaphore;
+    uint16_t service_start_handle;
+    uint16_t service_end_handle;
+    uint16_t readableCharacterticHandle;
+    uint16_t writeableCharacterticHandle;
     
     JBDConnection(){
         semaphore=xSemaphoreCreateMutex();
@@ -35,7 +41,13 @@ public:
         this->conn_id=connectionId;
         xSemaphoreGive(semaphore);
     }
+    
+    void setCharHandle(uint16_t readableCharacterticHandle, uint16_t writeableCharacterticHandle){
+        this->readableCharacterticHandle=readableCharacterticHandle;
+        this->writeableCharacterticHandle=writeableCharacterticHandle;
+    }
 };
+
 
 class JBDBLEStack {
     static const uint8_t JBD_APP_ID=0;
@@ -44,10 +56,10 @@ class JBDBLEStack {
 public:
     esp_gatt_if_t gattc_if;
     
-    JBDBLEStack(){
-//         configure_ble_stack();
-    }
-    
+    static esp_bt_uuid_t JBD_MAIN_SERVICE_UUID; //0000ff00-0000-1000-8000-00805f9b34fb
+    static esp_bt_uuid_t JDB_READABLE_CHAR_UUID; //0000ff01-0000-1000-8000-00805f9b34fb
+    static esp_bt_uuid_t JBD_WRITEABLE_CHAR_UUID;//0000ff02-0000-1000-8000-00805f9b34fb
+
     static JBDBLEStack* instance;
     static JBDBLEStack* getInstance(){
         if(NULL==instance){
@@ -77,6 +89,16 @@ public:
         }
         return NULL;
     }
+    
+    JBDConnection* findConnectionByConnId(uint16_t& connIdToFind){
+        for(int i=0; i<jbdControllersCount; i++){
+            if(jbdControllers[i].conn_id==connIdToFind){
+                return &jbdControllers[i];
+            }
+        }
+        return NULL;
+    }
+    
     
     void connectToControllers(){
         ESP_LOGI(TAG, "connectToControllers %d", jbdControllersCount);
@@ -176,10 +198,6 @@ public:
             }
             break;
         }
-        case ESP_GATTC_DIS_SRVC_CMPL_EVT:{
-            ESP_LOGI(TAG, "ESP_GATTC_DIS_SRVC_CMPL_EVT");
-            break;
-        }
         case ESP_GATTC_CONNECT_EVT:{
             ESP_LOGI(TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d", p_data->connect.conn_id, gattc_if);
 //             gl_profile_tab[PROFILE_BMS_READABLE].conn_id = p_data->connect.conn_id;
@@ -203,8 +221,213 @@ public:
             ESP_LOGI(TAG, "open success");
             break;
         }
+        case ESP_GATTC_DIS_SRVC_CMPL_EVT:{
+            ESP_LOGI(TAG, "ESP_GATTC_DIS_SRVC_CMPL_EVT");
+            esp_ble_gattc_search_service(gattc_if, param->cfg_mtu.conn_id, &JBD_MAIN_SERVICE_UUID);
+            break;
+        }
+        case ESP_GATTC_SEARCH_RES_EVT: {
+            ESP_LOGI(TAG, "SEARCH RES: conn_id = %x is primary service %d uuidlen=%d uuid16=%x", p_data->search_res.conn_id, p_data->search_res.is_primary, p_data->search_res.srvc_id.uuid.len, p_data->search_res.srvc_id.uuid.uuid.uuid16);
+            if (p_data->search_res.srvc_id.uuid.len == JBD_MAIN_SERVICE_UUID.len && p_data->search_res.srvc_id.uuid.uuid.uuid16 == JBD_MAIN_SERVICE_UUID.uuid.uuid16) {
+                ESP_LOGI(TAG, "JBD service found");
+                JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(param->search_res.conn_id);
+                conn->service_start_handle = p_data->search_res.start_handle;
+                conn->service_end_handle = p_data->search_res.end_handle;
+            }
+            break;
+        }
+        case ESP_GATTC_SEARCH_CMPL_EVT: {
+            ESP_LOGI(TAG, "ESP_GATTC_SEARCH_CMPL_EVT");
+            if (p_data->search_cmpl.status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "search service failed, error status = %x", p_data->search_cmpl.status);
+                break;
+            }
+            JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(param->search_cmpl.conn_id);
+            
+            uint16_t count = 0;
+            esp_gatt_status_t status = esp_ble_gattc_get_attr_count( gattc_if,
+                                                                        p_data->search_cmpl.conn_id,
+                                                                        ESP_GATT_DB_CHARACTERISTIC,
+                                                                        conn->service_start_handle,
+                                                                        conn->service_end_handle,
+                                                                        0,
+                                                                        &count);
+            if (status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "esp_ble_gattc_get_attr_count error");
+                break;
+            }
+            if (count != 2){
+                ESP_LOGE(TAG, "Unexpected number of charactertics in service");
+                break;
+            }
+
+            esp_gattc_char_elem_t writeableCharactertic;
+            count=1;
+            status = esp_ble_gattc_get_char_by_uuid(gattc_if,
+                                                        p_data->search_cmpl.conn_id,
+                                                        conn->service_start_handle,
+                                                        conn->service_end_handle,
+                                                        JBD_WRITEABLE_CHAR_UUID,
+                                                        &writeableCharactertic,
+                                                        &count);
+            if (status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "esp_ble_gattc_get_char_by_uuid for writeable error");
+                break;
+            }
+            if(count != 1){
+                ESP_LOGE(TAG, "writeableCharactertic not found");
+                break;
+            }
+
+            //-------
+            esp_gattc_char_elem_t readableCharactertic;
+            count=1;
+            status = esp_ble_gattc_get_char_by_uuid( gattc_if,
+                                                        p_data->search_cmpl.conn_id,
+                                                        conn->service_start_handle,
+                                                        conn->service_end_handle,
+                                                        JDB_READABLE_CHAR_UUID,
+                                                        &readableCharactertic,
+                                                        &count);
+            if (status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "esp_ble_gattc_get_char_by_uuid for readable error");
+                break;
+            }
+            if(count != 1){
+                ESP_LOGE(TAG, "readableCharactertic not found");
+                break;
+            }
+            if ((readableCharactertic.properties&ESP_GATT_CHAR_PROP_BIT_NOTIFY)==0){
+                ESP_LOGE(TAG, "readableCharactertic does not have notify flag");
+                break;
+            }
+            conn->setCharHandle(readableCharactertic.char_handle, writeableCharactertic.char_handle);
+            esp_ble_gattc_register_for_notify(gattc_if, conn->macAddress, conn->readableCharacterticHandle);
+//             break;
+//         }
+//         case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+//             ESP_LOGI(TAG, "ESP_GATTC_REG_FOR_NOTIFY_EVT");
+//             if (p_data->reg_for_notify.status != ESP_GATT_OK){
+//                 ESP_LOGE(TAG, "REG FOR NOTIFY failed: error status = %d", p_data->reg_for_notify.status);
+//                 break;
+//             }
+//             JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(param->reg_for_notify.conn_id);
+#if 1
+//             uint16_t count = 0;
+            esp_gatt_status_t ret_status = esp_ble_gattc_get_attr_count( gattc_if,
+                                                                            conn->conn_id,
+                                                                            ESP_GATT_DB_DESCRIPTOR,
+                                                                            conn->service_start_handle, //Ignored param
+                                                                            conn->service_end_handle, //Ignored param
+                                                                            conn->readableCharacterticHandle,
+                                                                            &count);
+            if (ret_status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "esp_ble_gattc_get_attr_count error");
+                break;
+            }
+            if (count == 0){
+                ESP_LOGE(TAG, "No notification characteristic found for readable");
+                break;
+            }
+            
+            const esp_bt_uuid_t notify_descr_uuid = {
+                .len = ESP_UUID_LEN_16,
+                .uuid = {.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG},
+            };
+            esp_gattc_descr_elem_t notificationDescriptor;
+            ret_status = esp_ble_gattc_get_descr_by_char_handle( gattc_if,
+                                                                    conn->conn_id,
+                                                                    conn->readableCharacterticHandle,
+                                                                    notify_descr_uuid,
+                                                                    &notificationDescriptor,
+                                                                    &count);
+            if (ret_status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "esp_ble_gattc_get_descr_by_char_handle error");
+                break;
+            }
+            if(count!=1){
+                ESP_LOGE(TAG, "Can't find a good count of notification char count=%d", count);
+                break;
+            }
+            if (!(notificationDescriptor.uuid.len == ESP_UUID_LEN_16 && notificationDescriptor.uuid.uuid.uuid16 == ESP_GATT_UUID_CHAR_CLIENT_CONFIG)){
+                ESP_LOGE(TAG, "Can't activate notification on this characteristic uuid=0x%04X", notificationDescriptor.uuid.uuid.uuid16);
+                break;
+            }
+            
+            uint16_t notify_en = 1;
+            esp_err_t write_status = esp_ble_gattc_write_char_descr( gattc_if,
+                                                            conn->conn_id,
+                                                            notificationDescriptor.handle,
+                                                            sizeof(notify_en),
+                                                            (uint8_t *)&notify_en,
+                                                            ESP_GATT_WRITE_TYPE_RSP,
+                                                            ESP_GATT_AUTH_REQ_NONE);
+            if (write_status != ESP_OK){
+                ESP_LOGE(TAG, "esp_ble_gattc_write_char_descr error");
+            }
+            ESP_LOGI(TAG, "Requested notification");
+#endif
+            break;
+        }
+        case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+            break; //Ignored
+        }
+        case ESP_GATTC_NOTIFY_EVT:
+            ESP_LOGI(TAG, "ESP_GATTC_NOTIFY_EVT");
+            if (p_data->notify.is_notify){
+                ESP_LOGI(TAG, "ESP_GATTC_NOTIFY_EVT, receive notify value:");
+            }else{
+                ESP_LOGI(TAG, "ESP_GATTC_NOTIFY_EVT, receive indicate value:");
+            }
+            esp_log_buffer_hex(TAG, p_data->notify.value, p_data->notify.value_len);
+            break;
+        case ESP_GATTC_WRITE_DESCR_EVT: {
+            ESP_LOGI(TAG, "ESP_GATTC_WRITE_DESCR_EVT");
+            if (p_data->write.status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "write descr failed, error status = %x", p_data->write.status);
+                break;
+            }
+            ESP_LOGI(TAG, "write descr success on connection %d, handle=%d. Notification is enabled.", p_data->write.conn_id, p_data->write.handle);
+//             sendBasicInfoRequest();
+                    ESP_LOGI(TAG, "Sending request for basic info");
+//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES_LEN;
+//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES[];
+            JBDConnection* conn=JBDBLEStack::getInstance()->findConnectionByConnId(param->write.conn_id);
+            extern uint8_t CMD_REQUEST_BASIC_INFO_LEN;
+            extern uint8_t CMD_REQUEST_BASIC_INFO[];
+            esp_err_t err=esp_ble_gattc_write_char( gattc_if,
+                                    p_data->write.conn_id,
+                                    conn->writeableCharacterticHandle,
+                                    CMD_REQUEST_BASIC_INFO_LEN,
+                                    CMD_REQUEST_BASIC_INFO,
+                                    ESP_GATT_WRITE_TYPE_NO_RSP,
+                                    ESP_GATT_AUTH_REQ_NONE);
+            if(ESP_OK != err){
+                ESP_LOGE(TAG, "Failed to write request");
+            }
+
+            break;
+        }
+        case ESP_GATTC_WRITE_CHAR_EVT:{
+            if (p_data->write.status != ESP_GATT_OK){
+                ESP_LOGE(TAG, "write char failed, error status = %x", p_data->write.status);
+                break;
+            }
+            ESP_LOGI(TAG, "write char success");
+            break;
+        }
+        case ESP_GATTC_DISCONNECT_EVT: {
+            ESP_LOGI(TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
+            break;
+        }
+        case ESP_GATTC_READ_CHAR_EVT: {
+            ESP_LOGI(TAG, "ESP_GATTC_READ_CHAR_EVT value len=%d", param->read.value_len);
+            esp_log_buffer_hex(TAG, p_data->read.value, p_data->read.value_len);
+            handle_jbd_response(p_data->read.value, p_data->read.value_len);
+            break;
+        }
         default:
-            ESP_LOGI(TAG, "Unhandeled GATT event %d", event);
+            ESP_LOGW(TAG, "Unhandeled GATT event %d", event);
             break;
         }
     }
@@ -274,6 +497,26 @@ public:
     }
 };
 JBDBLEStack* JBDBLEStack::instance=NULL;
+esp_bt_uuid_t JBDBLEStack::JBD_MAIN_SERVICE_UUID = { //0000ff00-0000-1000-8000-00805f9b34fb
+    .len = ESP_UUID_LEN_16,
+    .uuid={
+        .uuid16 = 0xFF00
+    }
+};
+
+esp_bt_uuid_t JBDBLEStack::JDB_READABLE_CHAR_UUID = { //0000ff01-0000-1000-8000-00805f9b34fb
+    .len = ESP_UUID_LEN_16,
+    .uuid={
+        .uuid16 = 0xFF01
+    }
+};
+
+esp_bt_uuid_t JBDBLEStack::JBD_WRITEABLE_CHAR_UUID = { //0000ff02-0000-1000-8000-00805f9b34fb
+    .len = ESP_UUID_LEN_16,
+    .uuid={
+        .uuid16 = 0xFF02
+    }
+};
 
 void JBDConnection::waitConnection(){
     esp_ble_gattc_open(JBDBLEStack::getInstance()->gattc_if, macAddress, addressType, true);
