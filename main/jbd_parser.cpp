@@ -98,6 +98,7 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
             result->payload.cellVoltages.voltagesMv[i]=parseUShort(inputIt);
             inputIt+=2;
         }
+        ESP_LOGD(TAG, "result->payload.cellVoltages.voltagesMv=%d %d %d %d", result->payload.cellVoltages.voltagesMv[0], result->payload.cellVoltages.voltagesMv[1], result->payload.cellVoltages.voltagesMv[2], result->payload.cellVoltages.voltagesMv[3]);
     }
     else if(0x05==inputIt[0]){ //Hardware version
         inputIt++;

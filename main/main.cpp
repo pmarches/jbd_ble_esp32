@@ -55,6 +55,7 @@ public:
     
     void handle_jbd_notification(uint8_t* fragmentedBytes, uint8_t fragmentLen);    
     void requestBasicInfo();
+    void requestCellVoltages();
 };
 
 
@@ -70,6 +71,8 @@ public:
     static esp_bt_uuid_t JBD_MAIN_SERVICE_UUID; //0000ff00-0000-1000-8000-00805f9b34fb
     static esp_bt_uuid_t JBD_READABLE_CHAR_UUID; //0000ff01-0000-1000-8000-00805f9b34fb
     static esp_bt_uuid_t JBD_WRITEABLE_CHAR_UUID;//0000ff02-0000-1000-8000-00805f9b34fb
+    uint8_t jbdControllersCount=0;
+    JBDConnection jbdControllers[2];
 
     static JBDBLEStack* instance;
     static JBDBLEStack* getInstance(){
@@ -80,8 +83,6 @@ public:
         return instance;
     }
     
-    uint8_t jbdControllersCount=0;
-    JBDConnection jbdControllers[2];
     
     void newControllerFound(esp_bd_addr_t bda, esp_ble_addr_type_t controllerAddressType){
         ESP_LOGI(TAG, "controllerAddressType=%d", controllerAddressType);
@@ -486,9 +487,6 @@ public:
             ESP_LOGE(TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
         }
     }
-    
-    void search(){
-    }
 };
 
 JBDBLEStack* JBDBLEStack::instance=NULL;
@@ -538,8 +536,6 @@ void JBDConnection::handle_jbd_notification(uint8_t* fragmentedBytes, uint8_t fr
 
 void JBDConnection::requestBasicInfo(){
     ESP_LOGI(TAG, "Sending request for basic info");
-//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES_LEN;
-//             extern uint8_t CMD_REQUEST_CELL_VOLTAGES[];
     extern uint8_t CMD_REQUEST_BASIC_INFO_LEN;
     extern uint8_t CMD_REQUEST_BASIC_INFO[];
     esp_err_t err=esp_ble_gattc_write_char(JBDBLEStack::getInstance()->gattc_if,
@@ -554,9 +550,29 @@ void JBDConnection::requestBasicInfo(){
     }
 }
 
+void JBDConnection::requestCellVoltages(){
+    extern uint8_t CMD_REQUEST_CELL_VOLTAGES_LEN;
+    extern uint8_t CMD_REQUEST_CELL_VOLTAGES[];
+    esp_err_t err=esp_ble_gattc_write_char(JBDBLEStack::getInstance()->gattc_if,
+                            this->conn_id,
+                            this->writeableCharacterticHandle,
+                            CMD_REQUEST_CELL_VOLTAGES_LEN,
+                            CMD_REQUEST_CELL_VOLTAGES,
+                            ESP_GATT_WRITE_TYPE_NO_RSP,
+                            ESP_GATT_AUTH_REQ_NONE);
+    if(ESP_OK != err){
+        ESP_LOGE(TAG, "Failed to write request");
+    }
+}
 
 extern "C" void app_main(void){
     JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
-    jbdBleStack->search();
+    while(true){
+        for(uint8_t i=0; i<jbdBleStack->jbdControllersCount; i++){
+            JBDConnection* conn=&jbdBleStack->jbdControllers[i];
+            conn->requestCellVoltages();
+            vTaskDelay(1000/portTICK_PERIOD_MS);
+        }
+    }
 }
 
