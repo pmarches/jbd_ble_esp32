@@ -44,7 +44,7 @@ public:
 
     static const uint8_t BASIC_INFO_REGISTER=0x03;
     static const uint8_t CELL_VOLTAGE_REGISTER=0x04;
-    static const uint8_t HARDWARE_VERSION_REGISTER=0x05;
+    static const uint8_t DEVICE_NAME_REGISTER=0x05;
     uint8_t registerAddress;
 
     uint8_t payloadLen;

@@ -634,9 +634,16 @@ extern "C" void test_parser();
 // #include <sys/select.h>
 
 void writefully(const int fd, const uint8_t* bytes, const size_t nbBytes){
-    size_t nbBytesWritten=0;
-    while(nbBytesWritten!=nbBytes){
-        nbBytesWritten+=write(fd, bytes+nbBytesWritten, nbBytes-nbBytesWritten);
+    esp_log_buffer_hex(__FUNCTION__, bytes, nbBytes);
+    ssize_t totalNbBytesWritten=0;
+    while(totalNbBytesWritten!=nbBytes){
+        ssize_t nbBytesWritten=write(fd, bytes+totalNbBytesWritten, nbBytes-totalNbBytesWritten);
+        if(nbBytesWritten<0){
+            ESP_LOGE(TAG, "write returned an error");
+        }
+        else{
+            totalNbBytesWritten+=nbBytesWritten;
+        }
     }
 }
 
@@ -646,33 +653,46 @@ void handle_message_to_bms(const JBDParseResult& msg){
         ESP_LOGE(TAG, "msg.payloadTypes=%d not yet supported", msg.payloadTypes);
         return;
     }
-    if(JBDRequest::READ!=msg.payload.request.operation){
-        ESP_LOGE(TAG, "Only READ operation is supported for now");
-        return;
-    }
-    
-    if(JBDRequest::BASIC_INFO_REGISTER==msg.payload.request.registerAddress){
+    if(JBDRequest::READ==msg.payload.request.operation){
+        if(JBDRequest::BASIC_INFO_REGISTER==msg.payload.request.registerAddress){
             const uint8_t BASIC_INFO_RESPONSE[]="\xDD\x03\x00\x1B\x17\x00\x00\x00\x02\xD0\x03\xE8\x00\x00\x20\x78\x00\x00\x00\x00\x00\x00\x10\x48\x03\x0F\x02\x0B\x76\x0B\x82\xFB\xFF\x77";
             writefully(STDOUT_FILENO, BASIC_INFO_RESPONSE, sizeof(BASIC_INFO_RESPONSE)-1);
-    }
-    else if(JBDRequest::CELL_VOLTAGE_REGISTER==msg.payload.request.registerAddress){
+        }
+        else if(JBDRequest::CELL_VOLTAGE_REGISTER==msg.payload.request.registerAddress){
             const uint8_t CELL_VOLTAGE_RESPONSE[]="\xdd\x04\x00\x08\x0d\x2e\x0d\x2b\x0d\x2b\x0d\x2b\xff\x15\x77";
             writefully(STDOUT_FILENO, CELL_VOLTAGE_RESPONSE, sizeof(CELL_VOLTAGE_RESPONSE)-1);
+        }
+        else if(JBDRequest::DEVICE_NAME_REGISTER==msg.payload.request.registerAddress){
+            const uint8_t DEVICE_NAME_RESPONSE[]="\xdd\x05\x00\x0a\x41\x41\x42\x43\x44\x45\x46\x47\x48\x49\xFD\xE8\x77";
+            writefully(STDOUT_FILENO, DEVICE_NAME_RESPONSE, sizeof(DEVICE_NAME_RESPONSE)-1);
+        }
+        else{
+//             printf("UKN REGISTER %d", msg.payload.request.registerAddress);
+            ESP_LOGE(TAG, "Unknown register %d", msg.payload.request.registerAddress);
+            return;
+        }
     }
-    else if(JBDRequest::HARDWARE_VERSION_REGISTER==msg.payload.request.registerAddress){
-            const uint8_t HARDWARE_VERSION_RESPONSE[]="\xDD\x05\x00\x0A\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\xFD\xE9\x77";
-            writefully(STDOUT_FILENO, HARDWARE_VERSION_RESPONSE, sizeof(HARDWARE_VERSION_RESPONSE)-1);
+    else if(JBDRequest::WRITE==msg.payload.request.operation){
+//         uint8_t registerAddress=0x00;
+        const uint8_t GENERIC_OK_RESPONSE[]="\xDD\x00\x00\x00\x00\x00\x77";
+//         GENERIC_OK_RESPONSE[1]=registerAddress;
+        writefully(STDOUT_FILENO, GENERIC_OK_RESPONSE, sizeof(GENERIC_OK_RESPONSE)-1);
     }
     else{
-        printf("UKNREGISTER %d", msg.payload.request.registerAddress);
-        ESP_LOGE(TAG, "Unknown register %d", msg.payload.request.registerAddress);
-        return;
+        ESP_LOGE(TAG, "Unknown operation %d", msg.payload.request.operation);
     }
 }
 
 void read_request_stdin_and_respond_stdout(){
+#if 1
+    while(true){
+        ESP_LOGI("TEST", "read_request_stdin_and_respond_stdout");
+        vTaskDelay(300/portTICK_PERIOD_MS);
+    }
+#endif
+
     uint8_t readBuffer[128];
-    int8_t readBufferLen=0;
+    int readBufferLen=0;
 //     fd_set readfds;
 //     FD_ZERO(&readfds);
 //     FD_SET(STDIN_FILENO, &readfds);
@@ -707,7 +727,10 @@ void read_request_stdin_and_respond_stdout(){
     }
 }
 
+void configure_network_client_logging();
+
 extern "C" void app_main(void){
+     configure_network_client_logging();
 //     test_parser();
 //     return;
 #if 0    

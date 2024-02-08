@@ -52,7 +52,7 @@ uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8
 
     uint8_t magic=inputIt[0]; inputIt++;
     if(magic!=START_BYTE){
-        ESP_LOGE(TAG, "Wrong start byte");
+        ESP_LOGE(TAG, "Wrong start byte. got 0x%02X", magic);
         return inputBytes;
     }
     
@@ -152,7 +152,7 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
         result->payloadTypes=JBDParseResult::CELL_INFO;
         result->payload.cellInfo=cellInfo;
     }
-    else if(JBDRequest::HARDWARE_VERSION_REGISTER==inputIt[0]){ //Hardware version
+    else if(JBDRequest::DEVICE_NAME_REGISTER==inputIt[0]){
         inputIt++;
         uint8_t  commandStatus=inputIt[0]; inputIt++;
         if(0x80==commandStatus){
