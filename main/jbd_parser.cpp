@@ -62,6 +62,7 @@ uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8
     request.registerAddress=inputIt[0]; inputIt++;
     request.payloadLen=inputIt[0]; inputIt++;
     result->payloadTypes=JBDParseResult::REQUEST;
+    inputIt+=request.payloadLen;
 
     const uint8_t nbBytesToCksum=inputIt-(inputBytes+2);
     const uint16_t computedChecksum=computeChecksum(inputBytes+2, nbBytesToCksum);
@@ -97,8 +98,7 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
         return inputIt;
     }
     inputIt++;
-    
-    
+        
     if(JBDRequest::BASIC_INFO_REGISTER==inputIt[0]){ //Basic info
         inputIt++;
         uint8_t  commandStatus=inputIt[0]; inputIt++;

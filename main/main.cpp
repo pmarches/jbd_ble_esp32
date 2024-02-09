@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <ctype.h>
+
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -13,10 +15,12 @@
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
 #include "esp_log.h"
+
+#include "driver/uart.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include <ctype.h>
 
 #include <jbd_parser.h>
 
@@ -647,6 +651,14 @@ void writefully(const int fd, const uint8_t* bytes, const size_t nbBytes){
     }
 }
 
+void writeStoredRegisterResponseUnsigned(uint8_t registerAddress, uint16_t unsignedValue){
+    uint8_t responseBytes[32];
+    uint8_t responseBytesLen;
+    JBDParser parser;
+    parser.buildStoredRegisterResponseUnsigned(responseBytes, &responseBytesLen, registerAddress, unsignedValue);    
+    writefully(STDOUT_FILENO, responseBytes, responseBytesLen);
+}
+
 //These message come from the GX
 void handle_message_to_bms(const JBDParseResult& msg){
     if(JBDParseResult::REQUEST!=msg.payloadTypes){
@@ -655,7 +667,7 @@ void handle_message_to_bms(const JBDParseResult& msg){
     }
     if(JBDRequest::READ==msg.payload.request.operation){
         if(JBDRequest::BASIC_INFO_REGISTER==msg.payload.request.registerAddress){
-            const uint8_t BASIC_INFO_RESPONSE[]="\xDD\x03\x00\x1B\x17\x00\x00\x00\x02\xD0\x03\xE8\x00\x00\x20\x78\x00\x00\x00\x00\x00\x00\x10\x48\x03\x0F\x02\x0B\x76\x0B\x82\xFB\xFF\x77";
+            const uint8_t BASIC_INFO_RESPONSE[]="\xdd\x03\x00\x1b\x05\x2b\xfd\x4f\x3e\x22\x4e\x20\x00\x85\x2c\x56\x00\x00\x00\x00\x00\x00\x17\x50\x03\x04\x02\x0b\xd7\x0b\xdf\xfa\x58\x77";
             writefully(STDOUT_FILENO, BASIC_INFO_RESPONSE, sizeof(BASIC_INFO_RESPONSE)-1);
         }
         else if(JBDRequest::CELL_VOLTAGE_REGISTER==msg.payload.request.registerAddress){
@@ -663,8 +675,20 @@ void handle_message_to_bms(const JBDParseResult& msg){
             writefully(STDOUT_FILENO, CELL_VOLTAGE_RESPONSE, sizeof(CELL_VOLTAGE_RESPONSE)-1);
         }
         else if(JBDRequest::DEVICE_NAME_REGISTER==msg.payload.request.registerAddress){
-            const uint8_t DEVICE_NAME_RESPONSE[]="\xdd\x05\x00\x0a\x41\x41\x42\x43\x44\x45\x46\x47\x48\x49\xFD\xE8\x77";
+            const uint8_t DEVICE_NAME_RESPONSE[]="\xdd\x05\x00\x09\x41\x42\x43\x44\x45\x46\x47\x48\x49\xFD\x8A\x77";
             writefully(STDOUT_FILENO, DEVICE_NAME_RESPONSE, sizeof(DEVICE_NAME_RESPONSE)-1);
+        }
+        else if(JBDRequest::CYCLE_CAP_REGISTER==msg.payload.request.registerAddress){
+            writeStoredRegisterResponseUnsigned(JBDRequest::CYCLE_CAP_REGISTER, 400);
+        }
+        else if(JBDRequest::CHARGE_OVER_CURRENT_REGISTER==msg.payload.request.registerAddress){
+            writeStoredRegisterResponseUnsigned(JBDRequest::CHARGE_OVER_CURRENT_REGISTER, 500);
+        }
+        else if(JBDRequest::DISCHARGE_OVER_CURRENT_REGISTER==msg.payload.request.registerAddress){
+            writeStoredRegisterResponseUnsigned(JBDRequest::DISCHARGE_OVER_CURRENT_REGISTER, 500);
+        }
+        else if(JBDRequest::FUNCTIONAL_CONFIG_REGISTER==msg.payload.request.registerAddress){
+            writeStoredRegisterResponseUnsigned(JBDRequest::FUNCTIONAL_CONFIG_REGISTER, 0x00);
         }
         else{
 //             printf("UKN REGISTER %d", msg.payload.request.registerAddress);
@@ -684,7 +708,9 @@ void handle_message_to_bms(const JBDParseResult& msg){
 }
 
 void read_request_stdin_and_respond_stdout(){
-#if 1
+    uart_set_baudrate(UART_NUM_0, 9600);
+    ESP_LOGI(__FUNCTION__, "read_request_stdin_and_respond_stdout");
+#if 0
     while(true){
         ESP_LOGI("TEST", "read_request_stdin_and_respond_stdout");
         vTaskDelay(300/portTICK_PERIOD_MS);

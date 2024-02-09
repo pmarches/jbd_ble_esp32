@@ -7,10 +7,12 @@
 #include <freertos/ringbuf.h>
 
 #include <esp_log.h>
+#include <esp_mac.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
 #include <nvs_flash.h>
 
+#include <mdns.h>
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
@@ -420,15 +422,37 @@ void init_network(){
     xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
 }
 
+char* generate_hostname(){
+    uint8_t mac[6];
+    char   *hostname;
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (-1 == asprintf(&hostname, "BLEBMS-%02X%02X%02X", mac[3], mac[4], mac[5])) {
+        abort();
+    }
+    return hostname;
+}
 
+static void initialise_mdns(void)
+{
+    char *hostname = generate_hostname();
+    ESP_ERROR_CHECK( mdns_init() );
+    ESP_ERROR_CHECK( mdns_hostname_set(hostname) );
+    ESP_LOGI(TAG, "mdns hostname set to: [%s]", hostname);
+    ESP_ERROR_CHECK( mdns_instance_name_set("BLEBMS instance") );
 
+    ESP_ERROR_CHECK( mdns_service_add("ESP32-WebServer", "_logs", "_tcp", 85, NULL, 0) );
+//     ESP_ERROR_CHECK( mdns_service_subtype_add_for_host("ESP32-WebServer", "_http", "_tcp", NULL, "_server") );
 
+    //add another TXT item
+//     ESP_ERROR_CHECK( mdns_service_txt_item_set("_http", "_tcp", "path", "/foobar") );
+    //change TXT item value
+//     ESP_ERROR_CHECK( mdns_service_txt_item_set_with_explicit_value_len("_http", "_tcp", "u", "admin", strlen("admin")) );
+    free(hostname);
+}
 
+char* logText=NULL;
 int network_client_printf(const char* format, va_list args){
-    char logText[1024];
-//     int nbChars=sprintf(logText, format, args);
-    int nbChars=strlen(format);
-    strcpy(logText, format);
+    int nbChars=vsprintf(logText, format, args);
     if(pdFALSE==xRingbufferSend(loggingQueueHandle, logText, nbChars, 0)){
         //Ring buffer is too small to contain the log text
         //TODO Truncate message before or increate ringbuffer size
@@ -437,7 +461,9 @@ int network_client_printf(const char* format, va_list args){
 }
 
 void configure_network_client_logging(){
+    logText=(char*) malloc(2048);
     loggingQueueHandle=xRingbufferCreate(2048, RINGBUF_TYPE_BYTEBUF);
     init_network();
+    initialise_mdns();
     esp_log_set_vprintf(network_client_printf);
 }
