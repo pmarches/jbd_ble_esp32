@@ -39,6 +39,11 @@ int16_t JBDParser::parseShort(const uint8_t* inputBytes){
     return ret;
 }
 
+void JBDParser::buildUShort(uint8_t* dest, uint16_t unsignedValue){
+    dest[0]=(unsignedValue & 0xFF00)>>8;
+    dest[1]=(unsignedValue & 0xFF);
+}
+
 uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result){
     esp_log_buffer_hex(TAG, inputBytes, inputBytesLen);
     if(NULL==result){
@@ -185,6 +190,48 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
     return inputIt;
 }
 
+void JBDParser::buildStoredRegisterResponseUnsigned(uint8_t* responseBytes, uint8_t* responseBytesLen, uint8_t registerAddress, uint16_t unsignedValue){
+    responseBytes[0]=JBDParser::START_BYTE;
+    responseBytes[1]=registerAddress;
+    responseBytes[2]=0x00; //OK
+    responseBytes[3]=2; //16 bits
+    buildUShort(responseBytes+4, unsignedValue);
+    buildUShort(responseBytes+6, computeChecksum(responseBytes+2, 4));
+    responseBytes[8]=JBDParser::END_BYTE;
+    *responseBytesLen=9;
+    esp_log_buffer_hex(__FUNCTION__, responseBytes, *responseBytesLen);
+}
+
+void JBDParser::buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, JBDPackInfo *packInfo){
+    uint8_t* it=buildBytes;
+    *it=START_BYTE; it++;
+    *it=JBDRequest::BASIC_INFO_REGISTER; it++;
+    *it=0; it++;//Command status
+
+    *it=0x1b;  it++; //PayloadLen
+    buildUShort(it, packInfo->packVoltage_cV); it+=2;
+    buildUShort(it, packInfo->packCurrent_mA); it+=2;
+    buildUShort(it, packInfo->balance_capacity_mAh); it+=2;
+    buildUShort(it, packInfo->full_capacity_mAh); it+=2;
+    buildUShort(it, packInfo->cycle_count); it+=2;
+    buildUShort(it, packInfo->manufacture_date); it+=2;
+    buildUShort(it, packInfo->cell_balance_status); it+=2;
+    buildUShort(it, packInfo->cell_balance_status2); it+=2;
+    buildUShort(it, packInfo->bitset_errors); it+=2;
+    *it=packInfo->softwareVersion; it++;
+    *it=packInfo->state_of_charge; it++;
+    *it=packInfo->fet_status; it++;
+    *it=packInfo->cell_count; it++;
+    *it=packInfo->temperature_sensor_count; it++;
+    for(int i=0; i<packInfo->temperature_sensor_count; i++){
+        buildUShort(it, packInfo->temperatures_deciK[i]); it+=2;
+    }
+    uint8_t nbBytesToChecksum=it-buildBytes-2;
+    buildUShort(it, computeChecksum(buildBytes+2, nbBytesToChecksum)); it+=2;
+    *it=END_BYTE; it++;
+    *buildBytesLen=it-buildBytes;
+}
+
 void JBDPackInfo::printJSON() const {
     printf("{\n");
     printf("  \"packVoltage_cV\": %u,\n", packVoltage_cV);
@@ -205,6 +252,17 @@ void JBDPackInfo::printJSON() const {
     printf("}\n");
 }
 
+void assertEquals(const char* tag, const uint8_t* gotBytes, size_t gotBytesLen, const uint8_t* expectedBytes, size_t expectedBytesLen){
+    if(gotBytesLen!=expectedBytesLen){
+        ESP_LOGE(TAG, "%s expected %d got %d", tag, expectedBytesLen, gotBytesLen);
+    }
+    if(memcmp(expectedBytes, gotBytes, expectedBytesLen)){
+        ESP_LOGE(TAG, "%s has differing content", tag);
+        esp_log_buffer_hex("EXPECTED", expectedBytes, expectedBytesLen);
+        esp_log_buffer_hex("     GOT", gotBytes, gotBytesLen);
+    }
+}
+
 extern "C" void test_parser(){
 //     uint16_t cksum=computeChecksum(NULL, 0);
 //     ESP_LOGE(TAG, "cksum=%d", cksum);
@@ -217,19 +275,42 @@ extern "C" void test_parser(){
 //         ESP_LOGI(TAG, "Cell %d=%dmv", i, msg.payload.cellVoltages.voltagesMv[i]);
 //     }
     
-    const uint8_t FROM_BMS_EXAMPLE1[]="\xDD\x03\x00\x1B\x17\x00\x00\x00\x02\xD0\x03\xE8\x00\x00\x20\x78\x00\x00\x00\x00\x00\x00\x10\x48\x03\x0F\x02\x0B\x76\x0B\x82\xFB\xFF\x77";
+    const uint8_t BASIC_INFO_FROM_BMS_EXAMPLE1[]="\xDD\x03\x00\x1B\x17\x00\x00\x00\x02\xD0\x03\xE8\x00\x00\x20\x78\x00\x00\x00\x00\x00\x00\x10\x48\x03\x0F\x02\x0B\x76\x0B\x82\xFB\xFF\x77";
     JBDParseResult example1;
-    parser.parseBytesFromBMS(FROM_BMS_EXAMPLE1, sizeof(FROM_BMS_EXAMPLE1)-1, &example1);
+    parser.parseBytesFromBMS(BASIC_INFO_FROM_BMS_EXAMPLE1, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE1)-1, &example1);
+    
+    uint8_t buildBytes[128];
+    uint8_t buildBytesLen=0;
+    parser.buildFromPackInfo(buildBytes, &buildBytesLen, &example1.payload.packInfo);
+    assertEquals("BASIC_INFO_FROM_BMS_EXAMPLE1", buildBytes, buildBytesLen, BASIC_INFO_FROM_BMS_EXAMPLE1, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE1)-1);    
     
     const uint8_t FROM_BMS_EXAMPLE2[]="\xDD\x05\x00\x0A\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\xFD\xE9\x77";
     JBDParseResult example2;
     parser.parseBytesFromBMS(FROM_BMS_EXAMPLE2, sizeof(FROM_BMS_EXAMPLE2)-1, &example2);
     
-    const uint8_t FROM_BMS_EXAMPLE3[]="\xdd\x03\x00\x1b\x05\x2b\xfd\x4f\x3e\x22\x4e\x20\x00\x85\x2c\x56\x00\x00\x00\x00\x00\x00\x17\x50\x03\x04\x02\x0b\xd7\x0b\xdf\xfa\x58\x77";
-    esp_log_buffer_hex(TAG, FROM_BMS_EXAMPLE3, sizeof(FROM_BMS_EXAMPLE3)-1);
+    const uint8_t BASIC_INFO_FROM_BMS_EXAMPLE3[]="\xdd\x03\x00\x1b\x05\x2b\xfd\x4f\x3e\x22\x4e\x20\x00\x85\x2c\x56\x00\x00\x00\x00\x00\x00\x17\x50\x03\x04\x02\x0b\xd7\x0b\xdf\xfa\x58\x77";
     JBDParseResult example3;
-    parser.parseBytesFromBMS(FROM_BMS_EXAMPLE3, sizeof(FROM_BMS_EXAMPLE3)-1, &example3);
+    parser.parseBytesFromBMS(BASIC_INFO_FROM_BMS_EXAMPLE3, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3)-1, &example3);
     example3.payload.packInfo.printJSON();
+    JBDPackInfo packInfo;
+    packInfo.packVoltage_cV=1323;
+    packInfo.packCurrent_mA=-689;
+    packInfo.balance_capacity_mAh=15906;
+    packInfo.full_capacity_mAh=20000;
+    packInfo.cycle_count=133;
+    packInfo.manufacture_date=11350;
+    packInfo.cell_balance_status=0;
+    packInfo.cell_balance_status2=0;
+    packInfo.bitset_errors=0;
+    packInfo.softwareVersion=23;
+    packInfo.state_of_charge=80;
+    packInfo.fet_status=3;
+    packInfo.cell_count=4;
+    packInfo.temperature_sensor_count=2;
+    packInfo.temperatures_deciK[0]=3031;
+    packInfo.temperatures_deciK[1]=3039;
+    parser.buildFromPackInfo(buildBytes, &buildBytesLen, &packInfo);
+    assertEquals("BASIC_INFO_FROM_BMS_EXAMPLE3", buildBytes, buildBytesLen, BASIC_INFO_FROM_BMS_EXAMPLE3, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3)-1);    
 
     JBDParseResult example4;
     parser.parseBytesToBMS(CMD_REQUEST_BASIC_INFO, CMD_REQUEST_BASIC_INFO_LEN, &example4);

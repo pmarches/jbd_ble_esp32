@@ -26,11 +26,6 @@
 
 #define TAG "JBD_MAIN"
 
-extern "C" void handle_jbd_response(const uint8_t* inputBytes, const uint8_t inputBytesLen);
-
-extern "C" void test_parser();
-// #include <sys/select.h>
-
 void writefully(const int fd, const uint8_t* bytes, const size_t nbBytes){
     esp_log_buffer_hex(__FUNCTION__, bytes, nbBytes);
     ssize_t totalNbBytesWritten=0;
@@ -53,6 +48,14 @@ void writeStoredRegisterResponseUnsigned(uint8_t registerAddress, uint16_t unsig
     writefully(STDOUT_FILENO, responseBytes, responseBytesLen);
 }
 
+class AggregateBMSModel {
+public:
+    uint8_t nbCells=8;
+    uint16_t cellVoltages[8];
+};
+
+AggregateBMSModel gModel;
+
 //These message come from the GX
 void handle_message_to_bms(const JBDParseResult& msg){
     if(JBDParseResult::REQUEST!=msg.payloadTypes){
@@ -61,8 +64,28 @@ void handle_message_to_bms(const JBDParseResult& msg){
     }
     if(JBDRequest::READ==msg.payload.request.operation){
         if(JBDRequest::BASIC_INFO_REGISTER==msg.payload.request.registerAddress){
-            const uint8_t BASIC_INFO_RESPONSE[]="\xdd\x03\x00\x1b\x05\x2b\xfd\x4f\x3e\x22\x4e\x20\x00\x85\x2c\x56\x00\x00\x00\x00\x00\x00\x17\x50\x03\x04\x02\x0b\xd7\x0b\xdf\xfa\x58\x77";
-            writefully(STDOUT_FILENO, BASIC_INFO_RESPONSE, sizeof(BASIC_INFO_RESPONSE)-1);
+            uint8_t buildBytes[128];
+            uint8_t buildBytesLen=0;
+            JBDPackInfo packInfo;
+            packInfo.packVoltage_cV=1323;
+            packInfo.packCurrent_mA=-689;
+            packInfo.balance_capacity_mAh=15906;
+            packInfo.full_capacity_mAh=20000;
+            packInfo.cycle_count=133;
+            packInfo.manufacture_date=11350;
+            packInfo.cell_balance_status=0;
+            packInfo.cell_balance_status2=0;
+            packInfo.bitset_errors=0;
+            packInfo.softwareVersion=23;
+            packInfo.state_of_charge=80;
+            packInfo.fet_status=3;
+            packInfo.cell_count=4;
+            packInfo.temperature_sensor_count=2;
+            packInfo.temperatures_deciK[0]=3031;
+            packInfo.temperatures_deciK[1]=3039;
+            JBDParser parser;
+            parser.buildFromPackInfo(buildBytes, &buildBytesLen, &packInfo);
+            writefully(STDOUT_FILENO, buildBytes, buildBytesLen);
         }
         else if(JBDRequest::CELL_VOLTAGE_REGISTER==msg.payload.request.registerAddress){
             const uint8_t CELL_VOLTAGE_RESPONSE[]="\xdd\x04\x00\x08\x0d\x2e\x0d\x2b\x0d\x2b\x0d\x2b\xff\x15\x77";
@@ -104,34 +127,17 @@ void handle_message_to_bms(const JBDParseResult& msg){
 void read_request_stdin_and_respond_stdout(){
     uart_set_baudrate(UART_NUM_0, 9600);
     ESP_LOGI(__FUNCTION__, "read_request_stdin_and_respond_stdout");
-#if 0
-    while(true){
-        ESP_LOGI("TEST", "read_request_stdin_and_respond_stdout");
-        vTaskDelay(300/portTICK_PERIOD_MS);
-    }
-#endif
 
     uint8_t readBuffer[128];
     int readBufferLen=0;
-//     fd_set readfds;
-//     FD_ZERO(&readfds);
-//     FD_SET(STDIN_FILENO, &readfds);
     JBDParser parser;
     while(true){
-//         int rc=select(STDIN_FILENO+1, &readfds, NULL, NULL, NULL);
-//         if(rc<0){
-//             perror("select returned an error\n");
-//             vTaskDelay(300/portTICK_PERIOD_MS);
-//             continue;
-//         }
-        
         int nbBytesRead=read(STDIN_FILENO, readBuffer+readBufferLen, sizeof(readBuffer)-readBufferLen);
         if(nbBytesRead>0){
             JBDParseResult cmdToBMS;
             readBufferLen+=nbBytesRead;
             uint8_t const* parsedPosition=parser.parseBytesToBMS(readBuffer, readBufferLen, &cmdToBMS);
             int nbBytesParsed=parsedPosition-readBuffer;
-//             printf("nbBytesRead=%d nbBytesParsed=%d\n", nbBytesRead, nbBytesParsed);
             if(nbBytesParsed){
                 memmove(readBuffer, parsedPosition, nbBytesParsed);
                 readBufferLen-=nbBytesParsed;
@@ -148,11 +154,12 @@ void read_request_stdin_and_respond_stdout(){
 }
 
 void configure_network_client_logging();
+extern "C" void test_parser();
 
 extern "C" void app_main(void){
-     configure_network_client_logging();
 //     test_parser();
 //     return;
+    configure_network_client_logging();
 #if 0    
     JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
     vTaskDelay(10000/portTICK_PERIOD_MS);

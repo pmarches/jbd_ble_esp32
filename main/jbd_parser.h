@@ -30,7 +30,7 @@ public:
     uint8_t fet_status;
     uint8_t cell_count;
     uint8_t temperature_sensor_count;
-    uint8_t temperatures_deciK[2];
+    uint16_t temperatures_deciK[2];
 
     void printJSON() const;
 };
@@ -86,22 +86,10 @@ public:
     static uint16_t computeChecksum(const uint8_t* inputBytes, const uint8_t inputBytesLen);
     static uint16_t parseUShort(const uint8_t* inputBytes);    
     static int16_t parseShort(const uint8_t* inputBytes);
-    static void renderUShort(uint8_t* dest, uint16_t unsignedValue){
-        dest[0]=(unsignedValue & 0xFF00)>>8;
-        dest[1]=(unsignedValue & 0xFF);
-    }
+    static void buildUShort(uint8_t* dest, uint16_t unsignedValue);
     uint8_t const* parseBytesFromBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result);
     uint8_t const* parseBytesToBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result);
-    
-    void buildStoredRegisterResponseUnsigned(uint8_t* responseBytes, uint8_t* responseBytesLen, uint8_t registerAddress, uint16_t unsignedValue){
-        responseBytes[0]=JBDParser::START_BYTE;
-        responseBytes[1]=registerAddress;
-        responseBytes[2]=0x00; //OK
-        responseBytes[3]=2; //16 bits
-        renderUShort(responseBytes+4, unsignedValue);
-        renderUShort(responseBytes+6, computeChecksum(responseBytes+2, 4));
-        responseBytes[8]=JBDParser::END_BYTE;
-        *responseBytesLen=9;
-        esp_log_buffer_hex(__FUNCTION__, responseBytes, *responseBytesLen);
-    }
+
+    void buildStoredRegisterResponseUnsigned(uint8_t* responseBytes, uint8_t* responseBytesLen, uint8_t registerAddress, uint16_t unsignedValue);
+    void buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, JBDPackInfo *packInfo);
 };
