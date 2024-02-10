@@ -24,6 +24,8 @@
 
 #include <jbd_parser.h>
 
+extern AggregateBMSModel gModel;
+
 class JBDConnection {
 public:
     esp_bd_addr_t macAddress;

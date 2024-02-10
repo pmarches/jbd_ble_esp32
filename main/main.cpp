@@ -50,56 +50,6 @@ void writeStoredRegisterResponseUnsigned(uint8_t registerAddress, uint16_t unsig
     writefully(STDOUT_FILENO, responseBytes, responseBytesLen);
 }
 
-class AggregateBMSModel {
-public:
-    static const uint8_t NB_BMS=2;
-    JBDPackInfo packInfo[NB_BMS];
-    JBDCellInfo cellInfo[NB_BMS];
-
-    AggregateBMSModel(){
-        JBDPackInfo packInfo;
-        memset(&packInfo, 0, sizeof(packInfo));
-        
-        packInfo.packVoltage_cV=1323;
-        packInfo.packCurrent_cA=-689;
-        packInfo.balance_capacity_mAh=15906;
-        packInfo.full_capacity_mAh=20000;
-        packInfo.cycle_count=133;
-        packInfo.manufacture_date=11350;
-        packInfo.cell_balance_status=0;
-        packInfo.cell_balance_status2=0;
-        packInfo.bitset_errors=0;
-        packInfo.softwareVersion=23;
-        packInfo.state_of_charge=80;
-        packInfo.fet_status=3;
-        packInfo.cell_count=4;
-        packInfo.temperature_sensor_count=2;
-        packInfo.temperatures_deciK[0]=3031;
-        packInfo.temperatures_deciK[1]=3039;
-
-        update(0, packInfo);
-        update(1, packInfo);
-    }
-    
-    void update(uint8_t bmsIdx, JBDPackInfo &packInfoInput){
-        packInfo[bmsIdx]=packInfoInput;
-    }
-
-    void getPackInfo(JBDPackInfo &packInfoOutput){
-        packInfoOutput=packInfo[0];
-    }
-    
-    void getDeviceName(char* outDeviceName){
-        strcpy(outDeviceName, "LiFePO4");
-    }
-
-    void getCellInfo(JBDCellInfo &cellInfoOutput){
-        cellInfoOutput.voltagesMv[0]=3374;
-        cellInfoOutput.voltagesMv[1]=3371;
-        cellInfoOutput.voltagesMv[2]=3371;
-        cellInfoOutput.voltagesMv[3]=3371;
-    }
-};
 
 AggregateBMSModel gModel;
 
@@ -194,7 +144,7 @@ void read_request_stdin_and_respond_stdout(){
 }
 
 void task_read_from_ble_bms(void* arg){
-    JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
+    JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance(&gModel);
     vTaskDelay(10000/portTICK_PERIOD_MS);
     while(true){
         for(uint8_t i=0; i<jbdBleStack->jbdControllersCount; i++){
