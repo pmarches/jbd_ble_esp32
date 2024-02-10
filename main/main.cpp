@@ -133,23 +133,28 @@ void read_request_stdin_and_respond_stdout(){
     JBDParser parser;
     while(true){
         int nbBytesRead=read(STDIN_FILENO, readBuffer+readBufferLen, sizeof(readBuffer)-readBufferLen);
-        if(nbBytesRead>0){
+        if(nbBytesRead<=0){ //Nothing received
+            vTaskDelay(300/portTICK_PERIOD_MS);
+            continue;
+        }
+        readBufferLen+=nbBytesRead;
+        
+        while(readBufferLen>=7){
             JBDParseResult cmdToBMS;
-            readBufferLen+=nbBytesRead;
             uint8_t const* parsedPosition=parser.parseBytesToBMS(readBuffer, readBufferLen, &cmdToBMS);
             int nbBytesParsed=parsedPosition-readBuffer;
-            if(nbBytesParsed){
-                memmove(readBuffer, parsedPosition, nbBytesParsed);
-                readBufferLen-=nbBytesParsed;
+            ESP_LOGI(TAG, "nbBytesParsed=%d", nbBytesParsed);
+
+            readBufferLen-=nbBytesParsed;
+            memmove(readBuffer, parsedPosition, readBufferLen);
                 
-                if(false==cmdToBMS.isSuccess){
-                    ESP_LOGE(TAG, "Result shows failure");
-                    continue;
-                }
+            if(cmdToBMS.isSuccess){
                 handle_message_to_bms(cmdToBMS);
             }
+            else {
+                ESP_LOGE(TAG, "Ignored some bytes because we failed to parse the message");
+            }
         }
-        vTaskDelay(300/portTICK_PERIOD_MS);
     }
 }
 

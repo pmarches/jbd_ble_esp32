@@ -46,19 +46,22 @@ void JBDParser::buildUShort(uint8_t* dest, uint16_t unsignedValue){
 
 uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result){
     esp_log_buffer_hex(TAG, inputBytes, inputBytesLen);
+    result->isSuccess=false;
     if(NULL==result){
         return inputBytes;
     }
-    result->isSuccess=false;
-    if(inputBytesLen<7){
-        return inputBytes;
-    }
+//     if(inputBytesLen<7){
+//         return inputBytes;
+//     }
+
+    result->isSuccess=true;
     uint8_t const* inputIt=inputBytes;
 
     uint8_t magic=inputIt[0]; inputIt++;
     if(magic!=START_BYTE){
         ESP_LOGE(TAG, "Wrong start byte. got 0x%02X", magic);
-        return inputBytes;
+        result->isSuccess=false;
+        return inputIt;
     }
     
     JBDRequest request;
@@ -74,17 +77,18 @@ uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8
     const uint16_t inputChecksum=parseUShort(inputIt); inputIt+=2;
     if(computedChecksum!=inputChecksum){
         ESP_LOGW(TAG, "Expected checksum 0x%02X, but was 0x%02X", inputChecksum, computedChecksum);
-        return inputBytes;
+        result->isSuccess=false;
+        return inputIt;
     }
 
-    if(END_BYTE!=inputIt[0]){
-        ESP_LOGW(TAG, "Expected END_BYTE 0x%02X, but was 0x%02X", END_BYTE, inputIt[0]);
-        return inputBytes;
+    magic=inputIt[0]; inputIt++;
+    if(END_BYTE!=magic){
+        ESP_LOGW(TAG, "Expected END_BYTE 0x%02X, but was 0x%02X", END_BYTE, magic);
+        result->isSuccess=false;
+        return inputIt;
     }
-    inputIt++;
-
     
-    result->isSuccess=true;
+    
     result->payload.request=request;
     return inputIt;
 }
