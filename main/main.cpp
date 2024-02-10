@@ -1,3 +1,5 @@
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+
 #include <unistd.h>
 #include <stdint.h>
 #include <string.h>
@@ -23,6 +25,7 @@
 #include "freertos/semphr.h"
 
 #include <jbd_parser.h>
+#include <jbd_ble.h>
 
 #define TAG "JBD_MAIN"
 
@@ -43,15 +46,59 @@ void writefully(const int fd, const uint8_t* bytes, const size_t nbBytes){
 void writeStoredRegisterResponseUnsigned(uint8_t registerAddress, uint16_t unsignedValue){
     uint8_t responseBytes[32];
     uint8_t responseBytesLen;
-    JBDParser parser;
-    parser.buildStoredRegisterResponseUnsigned(responseBytes, &responseBytesLen, registerAddress, unsignedValue);    
+    JBDParser::buildStoredRegisterResponseUnsigned(responseBytes, &responseBytesLen, registerAddress, unsignedValue);    
     writefully(STDOUT_FILENO, responseBytes, responseBytesLen);
 }
 
 class AggregateBMSModel {
 public:
-    uint8_t nbCells=8;
-    uint16_t cellVoltages[8];
+    static const uint8_t NB_BMS=2;
+    JBDPackInfo packInfo[NB_BMS];
+    JBDCellInfo cellInfo[NB_BMS];
+
+    AggregateBMSModel(){
+        JBDPackInfo packInfo;
+        memset(&packInfo, 0, sizeof(packInfo));
+        
+        packInfo.packVoltage_cV=1323;
+        packInfo.packCurrent_cA=-689;
+        packInfo.balance_capacity_mAh=15906;
+        packInfo.full_capacity_mAh=20000;
+        packInfo.cycle_count=133;
+        packInfo.manufacture_date=11350;
+        packInfo.cell_balance_status=0;
+        packInfo.cell_balance_status2=0;
+        packInfo.bitset_errors=0;
+        packInfo.softwareVersion=23;
+        packInfo.state_of_charge=80;
+        packInfo.fet_status=3;
+        packInfo.cell_count=4;
+        packInfo.temperature_sensor_count=2;
+        packInfo.temperatures_deciK[0]=3031;
+        packInfo.temperatures_deciK[1]=3039;
+
+        update(0, packInfo);
+        update(1, packInfo);
+    }
+    
+    void update(uint8_t bmsIdx, JBDPackInfo &packInfoInput){
+        packInfo[bmsIdx]=packInfoInput;
+    }
+
+    void getPackInfo(JBDPackInfo &packInfoOutput){
+        packInfoOutput=packInfo[0];
+    }
+    
+    void getDeviceName(char* outDeviceName){
+        strcpy(outDeviceName, "LiFePO4");
+    }
+
+    void getCellInfo(JBDCellInfo &cellInfoOutput){
+        cellInfoOutput.voltagesMv[0]=3374;
+        cellInfoOutput.voltagesMv[1]=3371;
+        cellInfoOutput.voltagesMv[2]=3371;
+        cellInfoOutput.voltagesMv[3]=3371;
+    }
 };
 
 AggregateBMSModel gModel;
@@ -63,37 +110,25 @@ void handle_message_to_bms(const JBDParseResult& msg){
         return;
     }
     if(JBDRequest::READ==msg.payload.request.operation){
+        uint8_t buildBytes[128];
+        uint8_t buildBytesLen=0;
         if(JBDRequest::BASIC_INFO_REGISTER==msg.payload.request.registerAddress){
-            uint8_t buildBytes[128];
-            uint8_t buildBytesLen=0;
             JBDPackInfo packInfo;
-            packInfo.packVoltage_cV=1323;
-            packInfo.packCurrent_mA=-689;
-            packInfo.balance_capacity_mAh=15906;
-            packInfo.full_capacity_mAh=20000;
-            packInfo.cycle_count=133;
-            packInfo.manufacture_date=11350;
-            packInfo.cell_balance_status=0;
-            packInfo.cell_balance_status2=0;
-            packInfo.bitset_errors=0;
-            packInfo.softwareVersion=23;
-            packInfo.state_of_charge=80;
-            packInfo.fet_status=3;
-            packInfo.cell_count=4;
-            packInfo.temperature_sensor_count=2;
-            packInfo.temperatures_deciK[0]=3031;
-            packInfo.temperatures_deciK[1]=3039;
-            JBDParser parser;
-            parser.buildFromPackInfo(buildBytes, &buildBytesLen, &packInfo);
+            gModel.getPackInfo(packInfo);
+            JBDParser::buildFromPackInfo(buildBytes, &buildBytesLen, &packInfo);
             writefully(STDOUT_FILENO, buildBytes, buildBytesLen);
         }
         else if(JBDRequest::CELL_VOLTAGE_REGISTER==msg.payload.request.registerAddress){
-            const uint8_t CELL_VOLTAGE_RESPONSE[]="\xdd\x04\x00\x08\x0d\x2e\x0d\x2b\x0d\x2b\x0d\x2b\xff\x15\x77";
-            writefully(STDOUT_FILENO, CELL_VOLTAGE_RESPONSE, sizeof(CELL_VOLTAGE_RESPONSE)-1);
+            JBDCellInfo cellInfo;
+            gModel.getCellInfo(cellInfo);
+            JBDParser::buildFromCellInfo(buildBytes, &buildBytesLen, &cellInfo);
+            writefully(STDOUT_FILENO, buildBytes, buildBytesLen);
         }
         else if(JBDRequest::DEVICE_NAME_REGISTER==msg.payload.request.registerAddress){
-            const uint8_t DEVICE_NAME_RESPONSE[]="\xdd\x05\x00\x09\x41\x42\x43\x44\x45\x46\x47\x48\x49\xFD\x8A\x77";
-            writefully(STDOUT_FILENO, DEVICE_NAME_RESPONSE, sizeof(DEVICE_NAME_RESPONSE)-1);
+            char deviceName[32];
+            gModel.getDeviceName(deviceName);
+            JBDParser::buildFromDeviceName(buildBytes, &buildBytesLen, deviceName);
+            writefully(STDOUT_FILENO, buildBytes, buildBytesLen);
         }
         else if(JBDRequest::CYCLE_CAP_REGISTER==msg.payload.request.registerAddress){
             writeStoredRegisterResponseUnsigned(JBDRequest::CYCLE_CAP_REGISTER, 400);
@@ -158,14 +193,7 @@ void read_request_stdin_and_respond_stdout(){
     }
 }
 
-void configure_network_client_logging();
-extern "C" void test_parser();
-
-extern "C" void app_main(void){
-//     test_parser();
-//     return;
-    configure_network_client_logging();
-#if 0    
+void task_read_from_ble_bms(){
     JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
     vTaskDelay(10000/portTICK_PERIOD_MS);
     while(true){
@@ -178,7 +206,22 @@ extern "C" void app_main(void){
             conn->printState();
         }
     }
-#endif
+}
+
+void configure_network_client_logging();
+extern "C" void test_parser();
+
+extern "C" void app_main(void){
+    esp_log_level_set("*", ESP_LOG_ERROR);        // set all components to ERROR level
+    esp_log_level_set("JBD_BLE", ESP_LOG_DEBUG);
+    esp_log_level_set("NETWORK_LOGGING", ESP_LOG_DEBUG);
+    esp_log_level_set("JDB_PARSER", ESP_LOG_DEBUG);
+    
+//     test_parser();
+//     return;
+    configure_network_client_logging();
+
+    task_read_from_ble_bms();
     read_request_stdin_and_respond_stdout();
 }
 

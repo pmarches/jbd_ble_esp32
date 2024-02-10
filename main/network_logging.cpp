@@ -1,3 +1,5 @@
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+
 #include <stdio.h>
 #include <string.h>
 

@@ -1,3 +1,5 @@
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+
 #include <cstring>
 #include <ctype.h>
 #include <stdio.h>
@@ -33,9 +35,9 @@ uint16_t JBDParser::parseUShort(const uint8_t* inputBytes){
 }
 
 int16_t JBDParser::parseShort(const uint8_t* inputBytes){
-//     esp_log_buffer_hex(__FUNCTION__, inputBytes, 2);
+//     esp_log_buffer_hex(TAG, inputBytes, 2);
     int16_t ret=(inputBytes[0]<<8)+inputBytes[1];
-//     ESP_LOGD(__FUNCTION__, "parseShort=%d", ret);
+//     ESP_LOGD(TAG, "parseShort=%d", ret);
     return ret;
 }
 
@@ -50,9 +52,6 @@ uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8
     if(NULL==result){
         return inputBytes;
     }
-//     if(inputBytesLen<7){
-//         return inputBytes;
-//     }
 
     result->isSuccess=true;
     uint8_t const* inputIt=inputBytes;
@@ -71,7 +70,7 @@ uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8
     request.payloadLen=inputIt[0]; inputIt++;
     result->payloadTypes=JBDParseResult::REQUEST;
     inputIt+=request.payloadLen;
-
+    
     const uint8_t nbBytesToCksum=inputIt-(inputBytes+2);
     const uint16_t computedChecksum=computeChecksum(inputBytes+2, nbBytesToCksum);
     const uint16_t inputChecksum=parseUShort(inputIt); inputIt+=2;
@@ -116,7 +115,7 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
         }
         else{
             uint8_t  payloadLen=inputIt[0]; inputIt++;
-            if(payloadLen>inputBytesLen){
+            if(4+payloadLen+2+1 >inputBytesLen){
                 ESP_LOGW(TAG, "Incomplete message, not parsing it");
                 return inputBytes;
             }
@@ -124,8 +123,8 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
             JBDPackInfo packInfo;
             packInfo.packVoltage_cV=parseUShort(inputIt); inputIt+=2;
             ESP_LOGD(TAG, "packInfo.packVoltage_cV=%u", packInfo.packVoltage_cV);
-            packInfo.packCurrent_mA=parseShort(inputIt); inputIt+=2;
-            ESP_LOGD(TAG, "packInfo.packCurrent_mA=%d", packInfo.packCurrent_mA);
+            packInfo.packCurrent_cA=parseShort(inputIt); inputIt+=2;
+            ESP_LOGD(TAG, "packInfo.packCurrent_cA=%d", packInfo.packCurrent_cA);
             packInfo.balance_capacity_mAh=parseUShort(inputIt); inputIt+=2;
             packInfo.full_capacity_mAh=parseUShort(inputIt); inputIt+=2;
             packInfo.cycle_count=parseUShort(inputIt); inputIt+=2;
@@ -203,7 +202,7 @@ void JBDParser::buildStoredRegisterResponseUnsigned(uint8_t* responseBytes, uint
     buildUShort(responseBytes+6, computeChecksum(responseBytes+2, 4));
     responseBytes[8]=JBDParser::END_BYTE;
     *responseBytesLen=9;
-    esp_log_buffer_hex(__FUNCTION__, responseBytes, *responseBytesLen);
+    esp_log_buffer_hex(TAG, responseBytes, *responseBytesLen);
 }
 
 void JBDParser::buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, JBDPackInfo *packInfo){
@@ -212,9 +211,9 @@ void JBDParser::buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, J
     *it=JBDRequest::BASIC_INFO_REGISTER; it++;
     *it=0; it++;//Command status
 
-    *it=0x1b;  it++; //PayloadLen
+    *it=27;  it++; //PayloadLen
     buildUShort(it, packInfo->packVoltage_cV); it+=2;
-    buildUShort(it, packInfo->packCurrent_mA); it+=2;
+    buildUShort(it, packInfo->packCurrent_cA); it+=2;
     buildUShort(it, packInfo->balance_capacity_mAh); it+=2;
     buildUShort(it, packInfo->full_capacity_mAh); it+=2;
     buildUShort(it, packInfo->cycle_count); it+=2;
@@ -230,16 +229,51 @@ void JBDParser::buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, J
     for(int i=0; i<packInfo->temperature_sensor_count; i++){
         buildUShort(it, packInfo->temperatures_deciK[i]); it+=2;
     }
+
     uint8_t nbBytesToChecksum=it-buildBytes-2;
     buildUShort(it, computeChecksum(buildBytes+2, nbBytesToChecksum)); it+=2;
     *it=END_BYTE; it++;
     *buildBytesLen=it-buildBytes;
 }
 
+void JBDParser::buildFromDeviceName(uint8_t* buildBytes, uint8_t* buildBytesLen, const char* deviceName){
+    uint8_t* it=buildBytes;
+    *it=START_BYTE; it++;
+    *it=JBDRequest::DEVICE_NAME_REGISTER; it++;
+    *it=0; it++;//Command status
+
+    size_t deviceNameLen=strlen(deviceName);
+    *it=(uint8_t) deviceNameLen;  it++; //PayloadLen
+    strncpy((char*) it, deviceName, deviceNameLen+1); it+=deviceNameLen;
+
+    uint8_t nbBytesToChecksum=it-buildBytes-2;
+    buildUShort(it, computeChecksum(buildBytes+2, nbBytesToChecksum)); it+=2;
+    *it=END_BYTE; it++;
+    *buildBytesLen=it-buildBytes;
+}
+
+void JBDParser::buildFromCellInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, JBDCellInfo *cellInfo){
+    uint8_t* it=buildBytes;
+    *it=START_BYTE; it++;
+    *it=JBDRequest::DEVICE_NAME_REGISTER; it++;
+    *it=0; it++;//Command status
+
+    *it=8;  it++; //PayloadLen
+    for(int i=0; i<4; i++){
+        buildUShort(it, cellInfo->voltagesMv[i]); it+=2;
+    }
+
+    uint8_t nbBytesToChecksum=it-buildBytes-2;
+    buildUShort(it, computeChecksum(buildBytes+2, nbBytesToChecksum)); it+=2;
+    *it=END_BYTE; it++;
+    *buildBytesLen=it-buildBytes;
+}
+
+
 void JBDPackInfo::printJSON() const {
     printf("{\n");
     printf("  \"packVoltage_cV\": %u,\n", packVoltage_cV);
-    printf("  \"packCurrent_mA\": %d,\n", packCurrent_mA);
+    printf("  \"packCurrent_cA\": %d,\n", packCurrent_cA);
     printf("  \"balance_capacity_mAh\": %u,\n", balance_capacity_mAh);
     printf("  \"full_capacity_mAh\": %u,\n", full_capacity_mAh);
     printf("  \"cycle_count\": %u,\n", cycle_count);
@@ -298,7 +332,7 @@ extern "C" void test_parser(){
     example3.payload.packInfo.printJSON();
     JBDPackInfo packInfo;
     packInfo.packVoltage_cV=1323;
-    packInfo.packCurrent_mA=-689;
+    packInfo.packCurrent_cA=-689;
     packInfo.balance_capacity_mAh=15906;
     packInfo.full_capacity_mAh=20000;
     packInfo.cycle_count=133;

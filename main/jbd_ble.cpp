@@ -1,3 +1,5 @@
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+
 #include <jbd_ble.h>
 
 #define TAG "JBD_BLE"
@@ -463,21 +465,23 @@ void JBDConnection::waitConnection(){
     xSemaphoreTake(semaphore, portMAX_DELAY);
 }
 
-void JBDConnection::handle_jbd_notification(uint8_t* fragmentedBytes, uint8_t fragmentLen){
+void JBDConnection::handle_jbd_notification(uint8_t* fragmentBytes, uint8_t fragmentLen){
     ESP_LOGD(TAG, "defragbufferLen=%d fragmentLen=%d", defragbufferLen, fragmentLen);
-    esp_log_buffer_hex(TAG, fragmentedBytes, fragmentLen);
-    memcpy(defragbuffer+defragbufferLen, fragmentedBytes, fragmentLen);
+    esp_log_buffer_hex(TAG, fragmentBytes, fragmentLen);
+    memcpy(defragbuffer+defragbufferLen, fragmentBytes, fragmentLen);
     defragbufferLen+=fragmentLen;
     
     JBDParseResult msg;
     uint8_t const* newLocation=parser.parseBytesFromBMS(defragbuffer, defragbufferLen, &msg);
     uint8_t nbBytesParsed=newLocation-defragbuffer;
     if(nbBytesParsed){
-        ESP_LOGD(TAG, "Sucessfully parsed message");
-        memmove(defragbuffer, newLocation, nbBytesParsed);
-        defragbufferLen=defragbufferLen-nbBytesParsed;
-        
-        receiveBMSUpdate(msg);
+        if(msg.isSuccess){
+            ESP_LOGD(TAG, "Sucessfully parsed message");
+            memmove(defragbuffer, newLocation, nbBytesParsed);
+            defragbufferLen=defragbufferLen-nbBytesParsed;
+            
+            receiveBMSUpdate(msg);
+        }
     }
 }
 
@@ -502,7 +506,7 @@ void JBDConnection::printState(){
     printf("\"bmsName\":\"%s\"", this->deviceName);
 //     this->basicInfo,
     printf(", \"packVoltage\":%4.02f", this->packInfo.packVoltage_cV/100.0);
-    printf(", \"packCurrent\":%5.02f", this->packInfo.packCurrent_mA/100.0);
+    printf(", \"packCurrent\":%5.02f", this->packInfo.packCurrent_cA/100.0);
 
     printf(", \"cellVoltage\":[");
     for(int i=0; i<4; i++){

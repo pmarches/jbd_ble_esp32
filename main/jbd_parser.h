@@ -1,3 +1,4 @@
+#pragma once
 
 class BaseJBDFromBMS {
 public:
@@ -17,7 +18,7 @@ public :
 class JBDPackInfo {
 public:
     uint16_t packVoltage_cV;
-    int16_t packCurrent_mA;
+    int16_t packCurrent_cA;
     uint16_t balance_capacity_mAh;
     uint16_t full_capacity_mAh;
     uint16_t cycle_count;
@@ -79,17 +80,19 @@ public:
 };
 
 class JBDParser {
-    const uint8_t START_BYTE=0xDD;
-    const uint8_t END_BYTE=0x77;
+    static const uint8_t START_BYTE=0xDD;
+    static const uint8_t END_BYTE=0x77;
     
 public:
     static uint16_t computeChecksum(const uint8_t* inputBytes, const uint8_t inputBytesLen);
     static uint16_t parseUShort(const uint8_t* inputBytes);    
     static int16_t parseShort(const uint8_t* inputBytes);
     static void buildUShort(uint8_t* dest, uint16_t unsignedValue);
-    uint8_t const* parseBytesFromBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result);
-    uint8_t const* parseBytesToBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result);
+    static uint8_t const* parseBytesFromBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result);
+    static uint8_t const* parseBytesToBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result);
 
-    void buildStoredRegisterResponseUnsigned(uint8_t* responseBytes, uint8_t* responseBytesLen, uint8_t registerAddress, uint16_t unsignedValue);
-    void buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, JBDPackInfo *packInfo);
+    static void buildStoredRegisterResponseUnsigned(uint8_t* responseBytes, uint8_t* responseBytesLen, uint8_t registerAddress, uint16_t unsignedValue);
+    static void buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, JBDPackInfo *packInfo);
+    static void buildFromDeviceName(uint8_t* buildBytes, uint8_t* buildBytesLen, const char* deviceName);
+    static void buildFromCellInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, JBDCellInfo *cellInfo);
 };
