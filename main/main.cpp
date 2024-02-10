@@ -193,7 +193,7 @@ void read_request_stdin_and_respond_stdout(){
     }
 }
 
-void task_read_from_ble_bms(){
+void task_read_from_ble_bms(void* arg){
     JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
     vTaskDelay(10000/portTICK_PERIOD_MS);
     while(true){
@@ -203,7 +203,6 @@ void task_read_from_ble_bms(){
             vTaskDelay(1000/portTICK_PERIOD_MS);
             conn->requestPackInfo();
             vTaskDelay(1000/portTICK_PERIOD_MS);
-            conn->printState();
         }
     }
 }
@@ -212,16 +211,17 @@ void configure_network_client_logging();
 extern "C" void test_parser();
 
 extern "C" void app_main(void){
-    esp_log_level_set("*", ESP_LOG_ERROR);        // set all components to ERROR level
+//     test_parser();
+//     return;
+    esp_log_level_set("*", ESP_LOG_WARN); // set all components level
     esp_log_level_set("JBD_BLE", ESP_LOG_DEBUG);
     esp_log_level_set("NETWORK_LOGGING", ESP_LOG_DEBUG);
     esp_log_level_set("JDB_PARSER", ESP_LOG_DEBUG);
-    
-//     test_parser();
-//     return;
     configure_network_client_logging();
 
-    task_read_from_ble_bms();
+    TaskHandle_t xHandle = NULL;
+    xTaskCreate(task_read_from_ble_bms, "NAME", 2048, NULL, tskIDLE_PRIORITY, &xHandle );
+
     read_request_stdin_and_respond_stdout();
 }
 

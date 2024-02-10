@@ -501,26 +501,6 @@ void JBDConnection::receiveBMSUpdate(const JBDParseResult& msg){
     }
 }
 
-void JBDConnection::printState(){
-    printf("{");
-    printf("\"bmsName\":\"%s\"", this->deviceName);
-//     this->basicInfo,
-    printf(", \"packVoltage\":%4.02f", this->packInfo.packVoltage_cV/100.0);
-    printf(", \"packCurrent\":%5.02f", this->packInfo.packCurrent_cA/100.0);
-
-    printf(", \"cellVoltage\":[");
-    for(int i=0; i<4; i++){
-        printf("%4.03f", this->cellInfo.voltagesMv[i]/1000.0);
-        if(i!=3){
-            printf(", ");
-        }
-    }
-    printf("], ");
-    
-        
-    printf("}\n");
-}
-
 void JBDConnection::requestBasicInfo(){
     ESP_LOGD(TAG, "Sending request for basic info");
     extern uint8_t CMD_REQUEST_BASIC_INFO_LEN;

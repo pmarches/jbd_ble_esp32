@@ -52,7 +52,6 @@ public:
     void requestPackInfo();
     void requestCellVoltages();
     void receiveBMSUpdate(const JBDParseResult& msg);
-    void printState();
 };
 
 
