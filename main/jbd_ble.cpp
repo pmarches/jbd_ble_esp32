@@ -28,7 +28,6 @@ JBDBLEStack* JBDBLEStack::getInstance(){
     }
     return instance;
 }
-
     
 void JBDBLEStack::newBMSFound(uint8_t* deviceName, uint8_t deviceNameLen, esp_bd_addr_t bda, esp_ble_addr_type_t controllerAddressType){
     JBDConnection* conn=&this->jbdControllers[jbdControllersCount];

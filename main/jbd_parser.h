@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 class BaseJBDFromBMS {
 public:
     uint8_t registerAddress;
@@ -12,7 +14,8 @@ public:
 
 class JBDCellInfo : public BaseJBDFromBMS {
 public :
-    uint16_t voltagesMv[4];
+    uint8_t cell_count; //Not part of the payload
+    uint16_t voltagesMv[8];
 };
 
 class JBDPackInfo {

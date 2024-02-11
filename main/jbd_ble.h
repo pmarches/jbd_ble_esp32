@@ -24,8 +24,6 @@
 
 #include <jbd_parser.h>
 
-extern AggregateBMSModel gModel;
-
 class JBDConnection {
 public:
     esp_bd_addr_t macAddress;
@@ -39,12 +37,12 @@ public:
     uint8_t defragbuffer[128];
     uint8_t defragbufferLen=0;
     JBDParser parser;
-
+    
     char deviceName[32];
     JBDBasicInfo basicInfo;
     JBDPackInfo packInfo;
     JBDCellInfo cellInfo;
-    
+
     JBDConnection();
     void waitConnection();
     void onConnected(uint16_t connectionId);
@@ -74,7 +72,7 @@ public:
 
     static JBDBLEStack* instance;
     static JBDBLEStack* getInstance();
-    
+        
     void newBMSFound(uint8_t* deviceName, uint8_t deviceNameLen, esp_bd_addr_t bda, esp_ble_addr_type_t controllerAddressType);    
     JBDConnection* findConnectionByMAC(esp_bd_addr_t& macAddressToFind);
     JBDConnection* findConnectionByConnId(uint16_t connIdToFind);

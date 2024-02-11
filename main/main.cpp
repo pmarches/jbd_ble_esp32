@@ -26,6 +26,7 @@
 
 #include <jbd_parser.h>
 #include <jbd_ble.h>
+#include <jbd_model.h>
 
 #define TAG "JBD_MAIN"
 
@@ -144,7 +145,7 @@ void read_request_stdin_and_respond_stdout(){
 }
 
 void task_read_from_ble_bms(void* arg){
-    JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance(&gModel);
+    JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
     vTaskDelay(10000/portTICK_PERIOD_MS);
     while(true){
         for(uint8_t i=0; i<jbdBleStack->jbdControllersCount; i++){

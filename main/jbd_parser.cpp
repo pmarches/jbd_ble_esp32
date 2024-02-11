@@ -258,8 +258,8 @@ void JBDParser::buildFromCellInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, J
     *it=JBDRequest::DEVICE_NAME_REGISTER; it++;
     *it=0; it++;//Command status
 
-    *it=8;  it++; //PayloadLen
-    for(int i=0; i<4; i++){
+    *it=2*cellInfo->cell_count;  it++; //PayloadLen
+    for(int i=0; i<cellInfo->cell_count; i++){
         buildUShort(it, cellInfo->voltagesMv[i]); it+=2;
     }
 
