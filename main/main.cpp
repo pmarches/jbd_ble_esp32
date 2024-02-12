@@ -150,6 +150,7 @@ public:
     TickType_t nextTicks;
     Countdown(uint32_t periodMS){
         this->periodTicks=pdMS_TO_TICKS(periodMS);
+        this->nextTicks=xTaskGetTickCount()+periodTicks;
     }
     
     bool hasElapsed(){
