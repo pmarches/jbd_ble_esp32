@@ -442,8 +442,8 @@ static void initialise_mdns(void)
     ESP_LOGI(TAG, "mdns hostname set to: [%s]", hostname);
     ESP_ERROR_CHECK( mdns_instance_name_set("BLEBMS instance") );
 
-    ESP_ERROR_CHECK( mdns_service_add("ESP32-WebServer", "_logs", "_tcp", 85, NULL, 0) );
-//     ESP_ERROR_CHECK( mdns_service_subtype_add_for_host("ESP32-WebServer", "_http", "_tcp", NULL, "_server") );
+    ESP_ERROR_CHECK( mdns_service_add(hostname, "_logs", "_tcp", 85, NULL, 0) );
+//     ESP_ERROR_CHECK( mdns_service_subtype_add_for_host(hostname, "_http", "_tcp", NULL, "_server") );
 
     //add another TXT item
 //     ESP_ERROR_CHECK( mdns_service_txt_item_set("_http", "_tcp", "path", "/foobar") );
