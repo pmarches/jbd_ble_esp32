@@ -144,16 +144,41 @@ void read_request_stdin_and_respond_stdout(){
     }
 }
 
+class Countdown {
+public:
+    TickType_t periodTicks;
+    TickType_t nextTicks;
+    Countdown(uint32_t periodMS){
+        this->periodTicks=pdMS_TO_TICKS(periodMS);
+    }
+    
+    bool hasElapsed(){
+        TickType_t now=xTaskGetTickCount();
+        if(now>nextTicks){
+            nextTicks=now+periodTicks;
+            return true;
+        }
+        return false;
+    }
+};
+
 void task_read_from_ble_bms(void* arg){
     JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
-    vTaskDelay(10000/portTICK_PERIOD_MS);
+    vTaskDelay(10000/portTICK_PERIOD_MS); //TODO Wait for both BLE connections to be up
+    Countdown packInfoCD(1000);
+    Countdown cellInfoCD(5000);
     while(true){
         for(uint8_t i=0; i<jbdBleStack->jbdControllersCount; i++){
             JBDConnection* conn=&jbdBleStack->jbdControllers[i];
-            conn->requestCellVoltages();
-            vTaskDelay(1000/portTICK_PERIOD_MS);
-            conn->requestPackInfo();
-            vTaskDelay(1000/portTICK_PERIOD_MS);
+            if(packInfoCD.hasElapsed()){
+                conn->requestPackInfo();
+                vTaskDelay(300/portTICK_PERIOD_MS);
+            }
+            if(cellInfoCD.hasElapsed()){
+                conn->requestCellVoltages();
+                vTaskDelay(300/portTICK_PERIOD_MS);
+            }
+            vTaskDelay(300/portTICK_PERIOD_MS);
         }
     }
 }
