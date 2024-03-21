@@ -319,18 +319,37 @@ int sendFully(int socket, uint8_t* bytes, size_t nbBytes){
     return 0;
 }
 
+#include <sys/select.h>
+bool isSocketOpen(int socket){
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(socket, &fds);
+    struct timeval timeout={
+        .tv_sec=0,
+        .tv_usec=1,
+    };
+    if(select(socket+1, &fds, NULL, NULL, &timeout)!=0){
+        return false;
+    }
+    return true;
+}
+
 RingbufHandle_t loggingQueueHandle=0;
 void forwardLoggingQueueToSocket(int socket){
     size_t textBytesLen=0;
     while(true){
         void* textBytes=xRingbufferReceive(loggingQueueHandle, &textBytesLen, pdMS_TO_TICKS(300));
-        if(NULL==textBytes){
-            continue;
+        if(isSocketOpen(socket)==false){
+            ESP_LOGI(TAG, "Disconnected");
+            break;
         }
         if(sendFully(socket, (uint8_t*) textBytes, textBytesLen)<0){
             break;
         }
-        vRingbufferReturnItem(loggingQueueHandle, textBytes);
+        
+        if(NULL!=textBytes){
+            vRingbufferReturnItem(loggingQueueHandle, textBytes);
+        }
     }
 }
 
@@ -340,9 +359,9 @@ static void tcp_server_task(void *pvParameters)
     int addr_family = (int)pvParameters;
     int ip_protocol = 0;
     int keepAlive = 1;
-    int keepIdle = KEEPALIVE_IDLE;
-    int keepInterval = KEEPALIVE_INTERVAL;
-    int keepCount = KEEPALIVE_COUNT;
+//     int keepIdle = KEEPALIVE_IDLE;
+//     int keepInterval = KEEPALIVE_INTERVAL;
+//     int keepCount = KEEPALIVE_COUNT;
     struct sockaddr_storage dest_addr;
 
     if (addr_family == AF_INET) {
@@ -390,10 +409,10 @@ static void tcp_server_task(void *pvParameters)
         }
 
         // Set tcp keepalive option
-        setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepAlive, sizeof(int));
-        setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepIdle, sizeof(int));
-        setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepInterval, sizeof(int));
-        setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(int));
+//         setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &keepAlive, sizeof(int));
+//         setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &keepIdle, sizeof(int));
+//         setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepInterval, sizeof(int));
+//         setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(int));
         // Convert ip address to string
         if (source_addr.ss_family == PF_INET) {
             inet_ntoa_r(((struct sockaddr_in *)&source_addr)->sin_addr, addr_str, sizeof(addr_str) - 1);
@@ -401,7 +420,7 @@ static void tcp_server_task(void *pvParameters)
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
         forwardLoggingQueueToSocket(sock);
         
-        shutdown(sock, 0);
+//         shutdown(sock, 0);
         close(sock);
     }
 
@@ -434,7 +453,7 @@ char* generate_hostname(){
     return hostname;
 }
 
-static void initialise_mdns(void)
+void initialise_mdns(void)
 {
     char *hostname = generate_hostname();
     ESP_ERROR_CHECK( mdns_init() );
@@ -465,7 +484,5 @@ int network_client_printf(const char* format, va_list args){
 void configure_network_client_logging(){
     logText=(char*) malloc(2048);
     loggingQueueHandle=xRingbufferCreate(2048, RINGBUF_TYPE_BYTEBUF);
-    init_network();
-    initialise_mdns();
     esp_log_set_vprintf(network_client_printf);
 }

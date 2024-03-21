@@ -29,7 +29,7 @@ public:
     esp_bd_addr_t macAddress;
     esp_ble_addr_type_t addressType;
     uint16_t conn_id;
-    SemaphoreHandle_t semaphore;
+    SemaphoreHandle_t connectSem;
     uint16_t service_start_handle;
     uint16_t service_end_handle;
     uint16_t readableCharacterticHandle;
@@ -44,8 +44,10 @@ public:
     JBDCellInfo cellInfo;
 
     JBDConnection();
-    void waitConnection();
+    void connectAndWait();
+    void waitUntilConnected();
     void onConnected(uint16_t connectionId);
+    void onDisconnected();
     void setCharHandle(uint16_t readableCharacterticHandle, uint16_t writeableCharacterticHandle);
     void handle_jbd_notification(uint8_t* fragmentedBytes, uint8_t fragmentLen);    
     void requestBasicInfo();
@@ -73,10 +75,11 @@ public:
     static JBDBLEStack* instance;
     static JBDBLEStack* getInstance();
         
-    void newBMSFound(uint8_t* deviceName, uint8_t deviceNameLen, esp_bd_addr_t bda, esp_ble_addr_type_t controllerAddressType);    
+    void newBMSFound(uint8_t* deviceName, uint8_t deviceNameLen, esp_bd_addr_t& bda, esp_ble_addr_type_t controllerAddressType);    
     JBDConnection* findConnectionByMAC(esp_bd_addr_t& macAddressToFind);
     JBDConnection* findConnectionByConnId(uint16_t connIdToFind);
     void connectToControllers();
+    void waitForControllers();
 
     static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
     static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);

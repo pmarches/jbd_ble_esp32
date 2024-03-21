@@ -8,7 +8,7 @@
 
 #include <jbd_parser.h>
 
-#define TAG "JDB_PARSER"
+#define TAG "JBD_PARSER"
 
 uint8_t CMD_REQUEST_BASIC_INFO_LEN=7;
 uint8_t CMD_REQUEST_BASIC_INFO[]={0xDD, 0xA5, 0x05, 0x00, 0xFF, 0xFB, 0x77};
@@ -93,6 +93,7 @@ uint8_t const* JBDParser::parseBytesToBMS(uint8_t const* inputBytes, const uint8
 }
 
 uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uint8_t inputBytesLen, JBDParseResult* result){
+    esp_log_buffer_hex(TAG, inputBytes, inputBytesLen);
     if(NULL==result){
         return inputBytes;
     }
@@ -153,8 +154,8 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
         inputIt++;
         ESP_LOGD(TAG, "nbCells=%d", nbCells);
         for(uint16_t i=0; i<nbCells; i++){
-            cellInfo.voltagesMv[i]=parseUShort(inputIt);
-            inputIt+=2;
+            cellInfo.voltagesMv[i]=parseUShort(inputIt); inputIt+=2;
+            ESP_LOGD(TAG, "cell %d=%d", i, cellInfo.voltagesMv[i]);
         }
 
         result->payloadTypes=JBDParseResult::CELL_INFO;

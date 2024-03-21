@@ -31,7 +31,7 @@
 #define TAG "JBD_MAIN"
 
 void writefully(const int fd, const uint8_t* bytes, const size_t nbBytes){
-    esp_log_buffer_hex(__FUNCTION__, bytes, nbBytes);
+    esp_log_buffer_hex(TAG, bytes, nbBytes);
     ssize_t totalNbBytesWritten=0;
     while(totalNbBytesWritten!=nbBytes){
         ssize_t nbBytesWritten=write(fd, bytes+totalNbBytesWritten, nbBytes-totalNbBytesWritten);
@@ -73,6 +73,9 @@ void handle_message_to_bms(const JBDParseResult& msg){
             JBDCellInfo cellInfo;
             gModel.getCellInfo(cellInfo);
             JBDParser::buildFromCellInfo(buildBytes, &buildBytesLen, &cellInfo);
+            for(int i=0; i<cellInfo.cell_count; i++){
+                ESP_LOGI(TAG, "Generated cell info cellInfo%d =%d", i, cellInfo.voltagesMv[i]);
+            }
             writefully(STDOUT_FILENO, buildBytes, buildBytesLen);
         }
         else if(JBDRequest::DEVICE_NAME_REGISTER==msg.payload.request.registerAddress){
@@ -112,7 +115,7 @@ void handle_message_to_bms(const JBDParseResult& msg){
 
 void read_request_stdin_and_respond_stdout(){
     uart_set_baudrate(UART_NUM_0, 9600);
-    ESP_LOGI(__FUNCTION__, "read_request_stdin_and_respond_stdout");
+    ESP_LOGI(TAG, "read_request_stdin_and_respond_stdout");
 
     uint8_t readBuffer[128];
     int readBufferLen=0;
@@ -129,7 +132,8 @@ void read_request_stdin_and_respond_stdout(){
             JBDParseResult cmdToBMS;
             uint8_t const* parsedPosition=parser.parseBytesToBMS(readBuffer, readBufferLen, &cmdToBMS);
             int nbBytesParsed=parsedPosition-readBuffer;
-            ESP_LOGI(TAG, "nbBytesParsed=%d", nbBytesParsed);
+            ESP_LOGI(TAG, "nbBytesParsed from SerialBattery to our controller %d", nbBytesParsed);
+            esp_log_buffer_hex(TAG, readBuffer, nbBytesParsed);
 
             readBufferLen-=nbBytesParsed;
             memmove(readBuffer, parsedPosition, readBufferLen);
@@ -165,7 +169,7 @@ public:
 
 void task_read_from_ble_bms(void* arg){
     JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
-    vTaskDelay(10000/portTICK_PERIOD_MS); //TODO Wait for both BLE connections to be up
+    
     Countdown packInfoCD(1000);
     Countdown cellInfoCD(5000);
     while(true){
@@ -185,20 +189,30 @@ void task_read_from_ble_bms(void* arg){
 }
 
 void configure_network_client_logging();
+void init_network();
+void initialise_mdns(void);
+
 extern "C" void test_parser();
 
 extern "C" void app_main(void){
 //     test_parser();
 //     return;
+#if 1
     esp_log_level_set("*", ESP_LOG_WARN); // set all components level
     esp_log_level_set("JBD_BLE", ESP_LOG_DEBUG);
     esp_log_level_set("NETWORK_LOGGING", ESP_LOG_DEBUG);
-    esp_log_level_set("JDB_PARSER", ESP_LOG_DEBUG);
+    esp_log_level_set("JBD_PARSER", ESP_LOG_DEBUG);
+    esp_log_level_set("JBD_MAIN", ESP_LOG_DEBUG);
     configure_network_client_logging();
+    init_network();
+    initialise_mdns();
+
+    JBDBLEStack* jbdBleStack=JBDBLEStack::getInstance();
+    jbdBleStack->waitForControllers();
 
     TaskHandle_t xHandle = NULL;
     xTaskCreate(task_read_from_ble_bms, "NAME", 2048, NULL, tskIDLE_PRIORITY, &xHandle );
-
+#endif
     read_request_stdin_and_respond_stdout();
 }
 
