@@ -66,16 +66,34 @@ void handle_message_to_bms(const JBDParseResult& msg){
         if(JBDRequest::BASIC_INFO_REGISTER==msg.payload.request.registerAddress){
             JBDPackInfo packInfo;
             gModel.getPackInfo(packInfo);
+#if 0            
+            packInfo.packVoltage_cV=1323;
+            packInfo.packCurrent_cA=-689;
+            packInfo.balance_capacity_mAh=15906;
+            packInfo.full_capacity_mAh=20000;
+            packInfo.cycle_count=133;
+            packInfo.manufacture_date=11350;
+            packInfo.cell_balance_status=0;
+            packInfo.cell_balance_status2=0;
+            packInfo.bitset_errors=0;
+            packInfo.softwareVersion=23;
+            packInfo.state_of_charge=80;
+            packInfo.fet_status=3;
+            packInfo.cell_count=4;
+            packInfo.temperature_sensor_count=2;
+            packInfo.temperatures_deciK[0]=3031;
+            packInfo.temperatures_deciK[1]=3039;
+#endif
             JBDParser::buildFromPackInfo(buildBytes, &buildBytesLen, &packInfo);
             writefully(STDOUT_FILENO, buildBytes, buildBytesLen);
         }
         else if(JBDRequest::CELL_VOLTAGE_REGISTER==msg.payload.request.registerAddress){
             JBDCellInfo cellInfo;
             gModel.getCellInfo(cellInfo);
-            JBDParser::buildFromCellInfo(buildBytes, &buildBytesLen, &cellInfo);
             for(int i=0; i<cellInfo.cell_count; i++){
                 ESP_LOGI(TAG, "Generated cell info cellInfo%d =%d", i, cellInfo.voltagesMv[i]);
             }
+            JBDParser::buildFromCellInfo(buildBytes, &buildBytesLen, &cellInfo);
             writefully(STDOUT_FILENO, buildBytes, buildBytesLen);
         }
         else if(JBDRequest::DEVICE_NAME_REGISTER==msg.payload.request.registerAddress){
@@ -113,9 +131,9 @@ void handle_message_to_bms(const JBDParseResult& msg){
     }
 }
 
-void read_request_stdin_and_respond_stdout(){
+void read_request_stdin_and_respond_stdout_jbd_protocol(){
     uart_set_baudrate(UART_NUM_0, 9600);
-    ESP_LOGI(TAG, "read_request_stdin_and_respond_stdout");
+    ESP_LOGI(TAG, "read_request_stdin_and_respond_stdout_jbd_protocol");
 
     uint8_t readBuffer[128];
     int readBufferLen=0;
@@ -123,7 +141,7 @@ void read_request_stdin_and_respond_stdout(){
     while(true){
         int nbBytesRead=read(STDIN_FILENO, readBuffer+readBufferLen, sizeof(readBuffer)-readBufferLen);
         if(nbBytesRead<=0){ //Nothing received
-            vTaskDelay(300/portTICK_PERIOD_MS);
+            vTaskDelay(pdMS_TO_TICKS(300));
             continue;
         }
         readBufferLen+=nbBytesRead;
@@ -140,11 +158,73 @@ void read_request_stdin_and_respond_stdout(){
                 
             if(cmdToBMS.isSuccess){
                 handle_message_to_bms(cmdToBMS);
+                ESP_LOGI(TAG, "Done with message. Response should have been sent");
             }
             else {
                 ESP_LOGE(TAG, "Ignored some bytes because we failed to parse the message");
             }
         }
+    }
+}
+
+void readOneHexLine(uint8_t* hexLine, uint8_t* hexLineLen, time_t timeoutMS){
+    const uint8_t START_MARKER=(uint8_t) ':';
+    const uint8_t END_MARKER=(uint8_t) '\n';
+    *hexLineLen=0;
+    time_t elapsed=0;
+    while(true){
+        if(read(STDIN_FILENO, hexLine+*hexLineLen, 1)<=0){ //Nothing received
+            const time_t READ_WAIT_MS=300;
+            elapsed+=READ_WAIT_MS;
+            if(elapsed>timeoutMS){
+                ESP_LOGI(TAG, "Read timeout. Discarding %d bytes already read", *hexLineLen);
+                *hexLineLen=0;
+                return;
+            }
+            vTaskDelay(pdMS_TO_TICKS(READ_WAIT_MS));
+            continue;
+        }
+        if(0==*hexLineLen && START_MARKER!=hexLine[0]){
+            continue; //Wait for start marker
+        }
+
+        *hexLineLen=*hexLineLen+1;
+        ESP_LOGI(TAG, "hexLineLen=%d. hexline '%*s'", *hexLineLen, *hexLineLen, hexLine);
+        if(END_MARKER==hexLine[*hexLineLen-1]){
+            ESP_LOGI(TAG, "Got the END_MARKER");
+            break;
+        }
+    }
+}
+
+bool isHexLineChecksumValid(uint8_t* hexLine, uint8_t hexLineLen){
+    return true;
+}
+
+void handleHexLine(uint8_t* hexLine, uint8_t hexLineLen){
+}
+
+void read_request_stdin_and_respond_stdout_hex_protocol(){
+    ESP_LOGI(TAG, "read_request_stdin_and_respond_stdout_hex_protocol");
+
+    const uint16_t VEDIRECT_BAUDRATE=19200;
+    ESP_LOGI(TAG, "Setting baud rate to %d", VEDIRECT_BAUDRATE);
+    uart_set_baudrate(UART_NUM_0, VEDIRECT_BAUDRATE);
+
+    uint8_t hexLine[128];
+    uint8_t hexLineLen=0;
+    while(true){
+        const char* ASYNC_MGS=":A0102000543\n";
+        writefully(STDOUT_FILENO, (uint8_t*) ASYNC_MGS, strlen(ASYNC_MGS));
+        memset(hexLine, 0, sizeof(hexLine));
+        readOneHexLine(hexLine, &hexLineLen, 5000);
+        if(false==isHexLineChecksumValid(hexLine, hexLineLen)){
+            ESP_LOGE(TAG, "Hexline failed checksum : %.*s", hexLineLen, hexLine);
+            esp_log_buffer_hex(TAG, hexLine, hexLineLen);
+            continue;
+        }
+        handleHexLine(hexLine, hexLineLen);
+//         buildHexLineResponse(hexLine
     }
 }
 
@@ -197,12 +277,13 @@ extern "C" void test_parser();
 extern "C" void app_main(void){
 //     test_parser();
 //     return;
-#if 1
     esp_log_level_set("*", ESP_LOG_WARN); // set all components level
     esp_log_level_set("JBD_BLE", ESP_LOG_DEBUG);
     esp_log_level_set("NETWORK_LOGGING", ESP_LOG_DEBUG);
     esp_log_level_set("JBD_PARSER", ESP_LOG_DEBUG);
     esp_log_level_set("JBD_MAIN", ESP_LOG_DEBUG);
+    esp_log_level_set("JBD_MODEL", ESP_LOG_DEBUG);
+    
     configure_network_client_logging();
     init_network();
     initialise_mdns();
@@ -211,8 +292,8 @@ extern "C" void app_main(void){
     jbdBleStack->waitForControllers();
 
     TaskHandle_t xHandle = NULL;
-    xTaskCreate(task_read_from_ble_bms, "NAME", 2048, NULL, tskIDLE_PRIORITY, &xHandle );
-#endif
-    read_request_stdin_and_respond_stdout();
+//     xTaskCreate(task_read_from_ble_bms, "NAME", 2048, NULL, tskIDLE_PRIORITY, &xHandle );
+//     read_request_stdin_and_respond_stdout_jbd_protocol();
+    read_request_stdin_and_respond_stdout_hex_protocol();
 }
 

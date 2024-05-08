@@ -45,7 +45,7 @@ void JBDConnection::handle_jbd_notification(uint8_t* fragmentBytes, uint8_t frag
     uint8_t nbBytesParsed=newLocation-defragbuffer;
     if(nbBytesParsed){
         if(msg.isSuccess){
-            ESP_LOGD(TAG, "Sucessfully parsed message");
+            ESP_LOGD(TAG, "Sucessfully parsed message from %s", this->deviceName);
             memmove(defragbuffer, newLocation, nbBytesParsed);
             defragbufferLen=defragbufferLen-nbBytesParsed;
             
@@ -66,6 +66,7 @@ void JBDConnection::receiveBMSUpdate(const JBDParseResult& msg){
         this->packInfo=msg.payload.packInfo;
     }
     else if(msg.payloadTypes==JBDParseResult::CELL_INFO){
+        ESP_LOGD(TAG, "Received cells update for BMS %s count=%d voltage0=%d", this->deviceName, msg.payload.cellInfo.cell_count, msg.payload.cellInfo.voltagesMv[0]);
         this->cellInfo=msg.payload.cellInfo;
     }
 }
@@ -140,7 +141,7 @@ void JBDBLEStack::newBMSFound(uint8_t* deviceName, uint8_t deviceNameLen, esp_bd
         return;
     }
     JBDConnection* conn=&this->jbdControllers[jbdControllersCount];
-    memcpy(conn->deviceName, deviceName, deviceNameLen);
+    strncpy(conn->deviceName, (char*) deviceName, deviceNameLen);
     ESP_LOGD(TAG, "controllerAddressType=%d", controllerAddressType);
     memcpy(conn->macAddress, bda, sizeof(esp_bd_addr_t));
     conn->addressType=controllerAddressType;
@@ -263,8 +264,8 @@ void JBDBLEStack::esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_i
                 .scan_type              = BLE_SCAN_TYPE_ACTIVE,
                 .own_addr_type          = BLE_ADDR_TYPE_PUBLIC,
                 .scan_filter_policy     = BLE_SCAN_FILTER_ALLOW_ALL,
-                .scan_interval          = 0x50,
-                .scan_window            = 0x0700,
+                .scan_interval          = 0x0100,
+                .scan_window            = 0x0100,
                 .scan_duplicate         = BLE_SCAN_DUPLICATE_ENABLE
             };
 

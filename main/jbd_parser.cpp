@@ -150,10 +150,10 @@ uint8_t const* JBDParser::parseBytesFromBMS(uint8_t const* inputBytes, const uin
         inputIt++;
         JBDCellInfo cellInfo;
         cellInfo.commandStatus=inputIt[0]; inputIt++;
-        uint16_t nbCells=inputIt[0]/2;
+        cellInfo.cell_count=inputIt[0]/2;
         inputIt++;
-        ESP_LOGD(TAG, "nbCells=%d", nbCells);
-        for(uint16_t i=0; i<nbCells; i++){
+        ESP_LOGD(TAG, "cellInfo.cell_count=%d", cellInfo.cell_count);
+        for(uint16_t i=0; i<cellInfo.cell_count; i++){
             cellInfo.voltagesMv[i]=parseUShort(inputIt); inputIt+=2;
             ESP_LOGD(TAG, "cell %d=%d", i, cellInfo.voltagesMv[i]);
         }
@@ -212,7 +212,7 @@ void JBDParser::buildFromPackInfo(uint8_t* buildBytes, uint8_t* buildBytesLen, J
     *it=JBDRequest::BASIC_INFO_REGISTER; it++;
     *it=0; it++;//Command status
 
-    *it=27;  it++; //PayloadLen
+    *it=0x17+(2*packInfo->temperature_sensor_count);  it++; //PayloadLen=27
     buildUShort(it, packInfo->packVoltage_cV); it+=2;
     buildUShort(it, packInfo->packCurrent_cA); it+=2;
     buildUShort(it, packInfo->balance_capacity_mAh); it+=2;
@@ -314,6 +314,10 @@ extern "C" void test_parser(){
 //         ESP_LOGI(TAG, "Cell %d=%dmv", i, msg.payload.cellVoltages.voltagesMv[i]);
 //     }
     
+    const uint8_t SERIAL_STARTER1[]="\xdd\xa5\x03\x00\xff\xfd\x77";
+    parser.parseBytesToBMS(SERIAL_STARTER1, sizeof(SERIAL_STARTER1), &msg);
+    assert(msg.isSuccess);
+    
     const uint8_t BASIC_INFO_FROM_BMS_EXAMPLE1[]="\xDD\x03\x00\x1B\x17\x00\x00\x00\x02\xD0\x03\xE8\x00\x00\x20\x78\x00\x00\x00\x00\x00\x00\x10\x48\x03\x0F\x02\x0B\x76\x0B\x82\xFB\xFF\x77";
     JBDParseResult example1;
     parser.parseBytesFromBMS(BASIC_INFO_FROM_BMS_EXAMPLE1, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE1)-1, &example1);
@@ -327,10 +331,15 @@ extern "C" void test_parser(){
     JBDParseResult example2;
     parser.parseBytesFromBMS(FROM_BMS_EXAMPLE2, sizeof(FROM_BMS_EXAMPLE2)-1, &example2);
     
-    const uint8_t BASIC_INFO_FROM_BMS_EXAMPLE3[]="\xdd\x03\x00\x1b\x05\x2b\xfd\x4f\x3e\x22\x4e\x20\x00\x85\x2c\x56\x00\x00\x00\x00\x00\x00\x17\x50\x03\x04\x02\x0b\xd7\x0b\xdf\xfa\x58\x77";
+    //Notice how these bytes are NOT null terminated, hence sizeof() is one less than the other examples
+    const uint8_t BASIC_INFO_FROM_BMS_EXAMPLE3[]={0xdd, 0x03, 0x00, 0x1b, 0x05, 0x2b, 0xfd, 0x4f, 0x3e, 0x22, 0x4e, 0x20, 0x00, 0x85, 0x2c, 0x56, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17, 0x50, 0x03, 0x04, 0x02, 0x0b, 0xd7, 0x0b, 0xdf, 0xfa, 0x58, 0x77};
     JBDParseResult example3;
-    parser.parseBytesFromBMS(BASIC_INFO_FROM_BMS_EXAMPLE3, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3)-1, &example3);
-    example3.payload.packInfo.printJSON();
+    const uint8_t* end=parser.parseBytesFromBMS(BASIC_INFO_FROM_BMS_EXAMPLE3, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3), &example3);
+    assert(example3.isSuccess);
+    if(end!=BASIC_INFO_FROM_BMS_EXAMPLE3+sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3)){
+        ESP_LOGE(TAG, "endPtr=%p should be %p", end, BASIC_INFO_FROM_BMS_EXAMPLE3+sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3));
+    }    
+//     example3.payload.packInfo.printJSON();
     JBDPackInfo packInfo;
     packInfo.packVoltage_cV=1323;
     packInfo.packCurrent_cA=-689;
@@ -349,7 +358,7 @@ extern "C" void test_parser(){
     packInfo.temperatures_deciK[0]=3031;
     packInfo.temperatures_deciK[1]=3039;
     parser.buildFromPackInfo(buildBytes, &buildBytesLen, &packInfo);
-    assertEquals("BASIC_INFO_FROM_BMS_EXAMPLE3", buildBytes, buildBytesLen, BASIC_INFO_FROM_BMS_EXAMPLE3, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3)-1);    
+    assertEquals("BASIC_INFO_FROM_BMS_EXAMPLE3", buildBytes, buildBytesLen, BASIC_INFO_FROM_BMS_EXAMPLE3, sizeof(BASIC_INFO_FROM_BMS_EXAMPLE3));    
 
     JBDParseResult example4;
     parser.parseBytesToBMS(CMD_REQUEST_BASIC_INFO, CMD_REQUEST_BASIC_INFO_LEN, &example4);

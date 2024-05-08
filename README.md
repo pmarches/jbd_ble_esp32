@@ -11,10 +11,19 @@ https://wiki.jmehan.com/download/attachments/59114595/JBD%20Protocol%20English%2
 
 ISSUES:
 - Can't connect twice to get the logs. nc BLEBMS-4A4D60.local 85 just hangs, no output.
-- Call values 0,1,2 stay zero
+- Cell values 0,1,2 stay zero
 - Sometimes, it only shows data from one battery. Does not deal with BLE disconnects I think
 - Percentage is wrong after a few hours of operation. Restart of python serial-battery does not improve things. Reboot of ESP32 fixes the issue for a while.
 
 TODO:
 - Improve log messages. Know to the context: BATTERY1, BATTERY2, GX comm, etc..
 - Actually read EEPROM settings from batteries. How to compute them?
+- Having trouble with the serial battery protocol. It might be different than the JBD protocol??
+
+HEX Protocol
+----
+https://www.victronenergy.com/upload/documents/BMV-7xx-HEX-Protocol.pdf
+
+Testing:
+socat -x TCP-LISTEN:100 PTY,raw,link=/dev/ttyS10
+/opt/victronenergy/vedirect-interface/start-vedirect.sh ttyS10 PRODUCT=builtin-vedirect
